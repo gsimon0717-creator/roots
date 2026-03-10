@@ -44,6 +44,10 @@ export default function App() {
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionColor, setNewSectionColor] = useState('slate');
   const [isAddingSection, setIsAddingSection] = useState(false);
+  const [isAddingTeam, setIsAddingTeam] = useState(false);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [isAddingProject, setIsAddingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
 
   const SECTION_COLORS = [
     { name: 'slate', bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' },
@@ -267,34 +271,41 @@ export default function App() {
     }
   };
 
-  const addTeam = async () => {
-    const name = prompt('Team Name:');
-    if (!name) return;
+  const addTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTeamName.trim()) return;
     try {
       const res = await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: newTeamName }),
       });
+      if (!res.ok) throw new Error('Failed to create team');
       const newTeam = await res.json();
       setTeams([...teams, newTeam]);
       setSelectedTeam(newTeam);
+      setNewTeamName('');
+      setIsAddingTeam(false);
+      // Reset projects for the new team
+      setSelectedProject(null);
     } catch (e) { console.error(e); }
   };
 
-  const addProject = async () => {
-    if (!selectedTeam) return;
-    const name = prompt('Project Name:');
-    if (!name) return;
+  const addProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTeam || !newProjectName.trim()) return;
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ team_id: selectedTeam.id, name }),
+        body: JSON.stringify({ team_id: selectedTeam.id, name: newProjectName }),
       });
+      if (!res.ok) throw new Error('Failed to create project');
       const newProject = await res.json();
       setProjects([...projects, newProject]);
       setSelectedProject(newProject);
+      setNewProjectName('');
+      setIsAddingProject(false);
     } catch (e) { console.error(e); }
   };
 
@@ -340,10 +351,28 @@ export default function App() {
               <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Users size={12} /> Teams
               </h2>
-              <button onClick={addTeam} className="text-slate-400 hover:text-indigo-600 transition-colors">
+              <button onClick={() => setIsAddingTeam(!isAddingTeam)} className="text-slate-400 hover:text-indigo-600 transition-colors">
                 <PlusCircle size={14} />
               </button>
             </div>
+
+            {isAddingTeam && (
+              <form onSubmit={addTeam} className="px-2 mb-3 space-y-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  placeholder="Team Name"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <div className="flex gap-1">
+                  <button type="submit" className="flex-grow bg-indigo-600 text-white py-1 rounded-lg text-[10px] font-bold">Save</button>
+                  <button type="button" onClick={() => setIsAddingTeam(false)} className="px-2 text-slate-400 text-[10px] font-bold">Cancel</button>
+                </div>
+              </form>
+            )}
+
             <div className="space-y-1">
               {teams.map(team => (
                 <button
@@ -368,10 +397,28 @@ export default function App() {
               <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <FolderKanban size={12} /> Projects
               </h2>
-              <button onClick={addProject} className="text-slate-400 hover:text-indigo-600 transition-colors">
+              <button onClick={() => setIsAddingProject(!isAddingProject)} className="text-slate-400 hover:text-indigo-600 transition-colors">
                 <PlusCircle size={14} />
               </button>
             </div>
+
+            {isAddingProject && (
+              <form onSubmit={addProject} className="px-2 mb-3 space-y-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  placeholder="Project Name"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <div className="flex gap-1">
+                  <button type="submit" className="flex-grow bg-indigo-600 text-white py-1 rounded-lg text-[10px] font-bold">Save</button>
+                  <button type="button" onClick={() => setIsAddingProject(false)} className="px-2 text-slate-400 text-[10px] font-bold">Cancel</button>
+                </div>
+              </form>
+            )}
+
             <div className="space-y-1">
               {filteredProjects.length === 0 ? (
                 <p className="text-[10px] text-slate-400 px-3 italic">No projects in this team</p>
@@ -567,7 +614,13 @@ export default function App() {
               ) : (
                 <>
                   {/* Render Sections */}
-                  {[...sections, { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
+                  {sections.length === 0 && tasks.length === 0 ? (
+                    <div className="py-20 text-center border-2 border-dashed border-slate-200 rounded-3xl">
+                      <CheckCircle2 className="mx-auto text-slate-300 mb-3" size={32} />
+                      <p className="text-slate-500 font-medium">No tasks yet. Create your first task above!</p>
+                    </div>
+                  ) : (
+                    [...sections, { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
                     const sectionTasks = tasks.filter(t => {
                       const sid = t.section_assignments?.[selectedProject.id];
                       return section.id === null ? !sid : sid === section.id;
@@ -746,7 +799,8 @@ export default function App() {
                         </div>
                       </div>
                     );
-                  })}
+                  })
+                )}
                 </>
               )}
             </div>
