@@ -75,6 +75,18 @@ db.exec(`
     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
     FOREIGN KEY (subtask_id) REFERENCES subtasks (id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER,
+    subtask_id INTEGER,
+    content TEXT NOT NULL,
+    attachment_name TEXT,
+    attachment_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
+    FOREIGN KEY (subtask_id) REFERENCES subtasks (id) ON DELETE CASCADE
+  );
 `);
 
 // Seed default data if empty
@@ -104,6 +116,20 @@ async function startServer() {
     res.status(201).json(db.prepare("SELECT * FROM teams WHERE id = ?").get(info.lastInsertRowid));
   });
 
+  app.patch("/api/teams/:id", (req, res) => {
+    const { id } = req.params;
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    db.prepare("UPDATE teams SET name = ? WHERE id = ?").run(name, id);
+    res.json(db.prepare("SELECT * FROM teams WHERE id = ?").get(id));
+  });
+
+  app.delete("/api/teams/:id", (req, res) => {
+    const { id } = req.params;
+    db.prepare("DELETE FROM teams WHERE id = ?").run(id);
+    res.status(204).send();
+  });
+
   // Projects API
   app.get("/api/projects", (req, res) => {
     const { team_id } = req.query;
@@ -122,6 +148,25 @@ async function startServer() {
     const info = db.prepare("INSERT INTO projects (team_id, name, description) VALUES (?, ?, ?)")
       .run(team_id, name, description || "");
     res.status(201).json(db.prepare("SELECT * FROM projects WHERE id = ?").get(info.lastInsertRowid));
+  });
+
+  app.patch("/api/projects/:id", (req, res) => {
+    const { id } = req.params;
+    const { name, description } = req.body;
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+    if (description !== undefined) { updates.push("description = ?"); values.push(description); }
+    if (updates.length === 0) return res.status(400).json({ error: "No fields to update" });
+    values.push(id);
+    db.prepare(`UPDATE projects SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+    res.json(db.prepare("SELECT * FROM projects WHERE id = ?").get(id));
+  });
+
+  app.delete("/api/projects/:id", (req, res) => {
+    const { id } = req.params;
+    db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+    res.status(204).send();
   });
 
   // API Routes
@@ -150,10 +195,12 @@ async function startServer() {
 
       const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(task.id).map((st: any) => {
         const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
-        return { ...st, attachments: stAttachments };
+        const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
+        return { ...st, attachments: stAttachments, comments: stComments };
       });
       const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(task.id);
-      return { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments };
+      const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(task.id);
+      return { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments };
     });
 
     res.json(hydratedTasks);
@@ -275,6 +322,25 @@ async function startServer() {
 
   app.delete("/api/attachments/:id", (req, res) => {
     db.prepare("DELETE FROM attachments WHERE id = ?").run(req.params.id);
+    res.status(204).send();
+  });
+
+  // Comments API
+  app.post("/api/comments", (req, res) => {
+    const { task_id, subtask_id, content, attachment_name, attachment_url } = req.body;
+    if (!content) return res.status(400).json({ error: "content is required" });
+    if (!task_id && !subtask_id) return res.status(400).json({ error: "task_id or subtask_id is required" });
+    
+    const info = db.prepare(`
+      INSERT INTO comments (task_id, subtask_id, content, attachment_name, attachment_url) 
+      VALUES (?, ?, ?, ?, ?)
+    `).run(task_id || null, subtask_id || null, content, attachment_name || null, attachment_url || null);
+    
+    res.status(201).json(db.prepare("SELECT * FROM comments WHERE id = ?").get(info.lastInsertRowid));
+  });
+
+  app.delete("/api/comments/:id", (req, res) => {
+    db.prepare("DELETE FROM comments WHERE id = ?").run(req.params.id);
     res.status(204).send();
   });
 

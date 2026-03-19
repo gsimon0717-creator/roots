@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Plus, 
   CheckCircle2, 
@@ -15,165 +15,376 @@ import {
   LayoutDashboard,
   Settings,
   MoreVertical,
-  PlusCircle
+  PlusCircle,
+  Edit2,
+  X,
+  Save,
+  ChevronDown,
+  ChevronUp,
+  Paperclip,
+  Check,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Task, Team, Project, Section } from './types';
+
+// Types
+interface Team {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+interface Project {
+  id: number;
+  team_id: number;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+interface Section {
+  id: number;
+  project_id: number;
+  name: string;
+  color: string;
+  order_index: number;
+}
+
+interface Subtask {
+  id: number;
+  task_id: number;
+  title: string;
+  status: 'pending' | 'completed';
+  comments?: Comment[];
+}
+
+interface Comment {
+  id: number;
+  task_id?: number;
+  subtask_id?: number;
+  content: string;
+  attachment_name?: string;
+  attachment_url?: string;
+  created_at: string;
+}
+
+interface Attachment {
+  id: number;
+  task_id?: number;
+  subtask_id?: number;
+  name: string;
+  url: string;
+}
+
+interface Task {
+  id: number;
+  title: string;
+  description: string;
+  status: 'pending' | 'completed';
+  priority: 'low' | 'moderate' | 'high' | 'urgent';
+  due_date: string;
+  created_at: string;
+  project_ids: number[];
+  section_assignments: Record<number, number>;
+  subtasks?: Subtask[];
+  attachments?: Attachment[];
+  comments?: Comment[];
+}
+
+const SECTION_COLORS = [
+  { name: 'slate', bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' },
+  { name: 'red', bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' },
+  { name: 'orange', bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
+  { name: 'amber', bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
+  { name: 'emerald', bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
+  { name: 'teal', bg: 'bg-teal-100', text: 'text-teal-700', border: 'border-teal-200' },
+  { name: 'blue', bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
+  { name: 'indigo', bg: 'bg-indigo-100', text: 'text-indigo-700', border: 'border-indigo-200' },
+  { name: 'violet', bg: 'bg-violet-100', text: 'text-violet-700', border: 'border-violet-200' },
+  { name: 'pink', bg: 'bg-pink-100', text: 'text-pink-700', border: 'border-pink-200' },
+];
 
 export default function App() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+
+  // Form States
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<Task['priority']>('moderate');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const [newTaskProjectIds, setNewTaskProjectIds] = useState<number[]>([]);
   const [newTaskSectionId, setNewTaskSectionId] = useState<number | null>(null);
-  const [showApiDocs, setShowApiDocs] = useState(false);
   
-  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [isAddingTeam, setIsAddingTeam] = useState(false);
+  
+  const [newProjectName, setNewProjectName] = useState('');
+  const [isAddingProject, setIsAddingProject] = useState(false);
+  
+  const [newSectionName, setNewSectionName] = useState('');
+  const [newSectionColor, setNewSectionColor] = useState('slate');
+  const [isAddingSection, setIsAddingSection] = useState(false);
+
+  // Editing States
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
+  const [editingTeamName, setEditingTeamName] = useState('');
+  
+  const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState('');
+  const [editingProjectDescription, setEditingProjectDescription] = useState('');
+  
+  const [editingSectionId, setEditingSectionId] = useState<number | null>(null);
+  const [editingSectionName, setEditingSectionName] = useState('');
+  const [editingSectionColor, setEditingSectionColor] = useState('slate');
+  
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editingTaskTitle, setEditingTaskTitle] = useState('');
+  const [editingTaskPriority, setEditingTaskPriority] = useState<Task['priority']>('moderate');
+  const [editingTaskDueDate, setEditingTaskDueDate] = useState('');
+
+  const [editingSubtaskId, setEditingSubtaskId] = useState<number | null>(null);
+  const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('');
+
+  const [currentView, setCurrentView] = useState<'project' | 'all-tasks' | 'about'>('project');
+  const [sortField, setSortField] = useState<string>('due_date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [newAttachmentName, setNewAttachmentName] = useState('');
   const [newAttachmentUrl, setNewAttachmentUrl] = useState('');
+  
+  const [newCommentContent, setNewCommentContent] = useState('');
+  const [newCommentAttachmentName, setNewCommentAttachmentName] = useState('');
+  const [newCommentAttachmentUrl, setNewCommentAttachmentUrl] = useState('');
 
-  const [sections, setSections] = useState<Section[]>([]);
-  const [newSectionName, setNewSectionName] = useState('');
-  const [newSectionColor, setNewSectionColor] = useState('slate');
-  const [isAddingSection, setIsAddingSection] = useState(false);
-  const [isAddingTeam, setIsAddingTeam] = useState(false);
-  const [newTeamName, setNewTeamName] = useState('');
-  const [isAddingProject, setIsAddingProject] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
+  const [showApiDocs, setShowApiDocs] = useState(false);
 
-  const SECTION_COLORS = [
-    { name: 'slate', bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' },
-    { name: 'red', bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' },
-    { name: 'orange', bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200' },
-    { name: 'amber', bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
-    { name: 'emerald', bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
-    { name: 'blue', bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
-    { name: 'indigo', bg: 'bg-indigo-100', text: 'text-indigo-700', border: 'border-indigo-200' },
-    { name: 'violet', bg: 'bg-violet-100', text: 'text-violet-700', border: 'border-violet-200' },
-  ];
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const teamsRes = await fetch('/api/teams');
-      const teamsData = await teamsRes.json();
-      setTeams(teamsData);
+      const [teamsRes, projectsRes, tasksRes] = await Promise.all([
+        fetch('/api/teams'),
+        fetch('/api/projects'),
+        fetch('/api/tasks')
+      ]);
       
-      if (teamsData.length > 0 && !selectedTeam) {
-        setSelectedTeam(teamsData[0]);
-      }
-
-      const projectsRes = await fetch('/api/projects');
+      const teamsData = await teamsRes.json();
       const projectsData = await projectsRes.json();
+      const tasksData = await tasksRes.json();
+      
+      setTeams(teamsData);
       setProjects(projectsData);
-
-      if (projectsData.length > 0 && !selectedProject) {
-        // Find first project of the selected team
-        const teamId = selectedTeam?.id || teamsData[0]?.id;
-        const firstProject = projectsData.find((p: Project) => p.team_id === teamId);
-        if (firstProject) setSelectedProject(firstProject);
-      }
+      setTasks(tasksData);
 
       if (selectedProject) {
-        const tasksRes = await fetch(`/api/tasks?project_id=${selectedProject.id}`);
-        const tasksData = await tasksRes.json();
-        setTasks(tasksData);
-
         const sectionsRes = await fetch(`/api/sections?project_id=${selectedProject.id}`);
         const sectionsData = await sectionsRes.json();
         setSections(sectionsData);
-      } else {
-        const tasksRes = await fetch('/api/tasks');
-        const tasksData = await tasksRes.json();
-        setTasks(tasksData);
       }
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
+    } catch (e) {
+      console.error('Failed to fetch data', e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedProject]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
-  // Refresh tasks and sections when project changes
-  useEffect(() => {
-    const fetchProjectData = async () => {
-      if (!selectedProject) return;
-      try {
-        const tasksRes = await fetch(`/api/tasks?project_id=${selectedProject.id}`);
-        const tasksData = await tasksRes.json();
-        setTasks(tasksData);
+  // Team Actions
+  const addTeam = async () => {
+    if (!newTeamName.trim()) return;
+    try {
+      await fetch('/api/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newTeamName }),
+      });
+      setNewTeamName('');
+      setIsAddingTeam(false);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
 
-        const sectionsRes = await fetch(`/api/sections?project_id=${selectedProject.id}`);
-        const sectionsData = await sectionsRes.json();
-        setSections(sectionsData);
-      } catch (e) {
-        console.error(e);
-      }
-    };
-    fetchProjectData();
-  }, [selectedProject]);
+  const updateTeam = async (id: number, name: string) => {
+    try {
+      await fetch(`/api/teams/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      setEditingTeamId(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
 
+  const deleteTeam = async (id: number) => {
+    if (!confirm('Delete this team and all its projects?')) return;
+    try {
+      await fetch(`/api/teams/${id}`, { method: 'DELETE' });
+      if (selectedTeam?.id === id) setSelectedTeam(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  // Project Actions
+  const addProject = async () => {
+    if (!newProjectName.trim() || !selectedTeam) return;
+    try {
+      await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newProjectName, team_id: selectedTeam.id }),
+      });
+      setNewProjectName('');
+      setIsAddingProject(false);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const updateProject = async (id: number, name: string, description: string) => {
+    try {
+      await fetch(`/api/projects/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
+      setEditingProjectId(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteProject = async (id: number) => {
+    if (!confirm('Delete this project and all its tasks?')) return;
+    try {
+      await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+      if (selectedProject?.id === id) setSelectedProject(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  // Section Actions
+  const addSection = async () => {
+    if (!newSectionName.trim() || !selectedProject) return;
+    try {
+      await fetch('/api/sections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: selectedProject.id, name: newSectionName, color: newSectionColor }),
+      });
+      setNewSectionName('');
+      setIsAddingSection(false);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const updateSection = async (id: number, name: string, color: string) => {
+    try {
+      await fetch(`/api/sections/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color }),
+      });
+      setEditingSectionId(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteSection = async (id: number) => {
+    if (!confirm('Delete this section? Tasks will remain but be uncategorized.')) return;
+    try {
+      await fetch(`/api/sections/${id}`, { method: 'DELETE' });
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  // Task Actions
   const addTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
-
-    const projectIds = newTaskProjectIds.length > 0 
-      ? newTaskProjectIds 
-      : (selectedProject ? [selectedProject.id] : []);
-
     try {
-      const response = await fetch('/api/tasks', {
+      const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           title: newTaskTitle,
-          project_ids: projectIds,
           priority: newTaskPriority,
-          due_date: newTaskDueDate || null,
-          section_id: newTaskSectionId
+          due_date: newTaskDueDate,
+          project_ids: newTaskProjectIds.length > 0 ? newTaskProjectIds : (selectedProject ? [selectedProject.id] : [])
         }),
       });
-      if (response.ok) {
-        setNewTaskTitle('');
-        setNewTaskPriority('moderate');
-        setNewTaskDueDate('');
-        setNewTaskProjectIds([]);
-        setNewTaskSectionId(null);
-        fetchData(); // Refresh everything to get hydrated task
+      const task = await res.json();
+      
+      if (newTaskSectionId && selectedProject) {
+        await fetch(`/api/tasks/${task.id}/section`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section_id: newTaskSectionId, current_project_id: selectedProject.id }),
+        });
       }
-    } catch (error) {
-      console.error('Failed to add task:', error);
-    }
+      
+      setNewTaskTitle('');
+      setNewTaskPriority('moderate');
+      setNewTaskDueDate('');
+      setNewTaskSectionId(null);
+      fetchData();
+    } catch (e) { console.error(e); }
   };
 
+  const updateTaskStatus = async (id: number, status: 'pending' | 'completed') => {
+    try {
+      await fetch(`/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const updateTaskDetails = async (id: number, details: Partial<Task>) => {
+    try {
+      await fetch(`/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(details),
+      });
+      setEditingTaskId(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteTask = async (id: number) => {
+    if (!confirm('Delete this task?')) return;
+    try {
+      await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  // Subtask Actions
   const addSubtask = async (taskId: number) => {
     if (!newSubtaskTitle.trim()) return;
     try {
-      const res = await fetch('/api/subtasks', {
+      await fetch('/api/subtasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: taskId, title: newSubtaskTitle }),
       });
-      if (res.ok) {
-        setNewSubtaskTitle('');
-        fetchData();
-      }
+      setNewSubtaskTitle('');
+      fetchData();
     } catch (e) { console.error(e); }
   };
 
-  const toggleSubtask = async (subtask: any) => {
+  const toggleSubtask = async (subtask: Subtask) => {
     const newStatus = subtask.status === 'completed' ? 'pending' : 'completed';
     try {
       await fetch(`/api/subtasks/${subtask.id}`, {
@@ -185,310 +396,541 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const updateSubtask = async (id: number, title: string) => {
+    try {
+      await fetch(`/api/subtasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      setEditingSubtaskId(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteSubtask = async (id: number) => {
+    if (!confirm('Delete this subtask?')) return;
+    try {
+      await fetch(`/api/subtasks/${id}`, { method: 'DELETE' });
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  // Attachment Actions
   const addAttachment = async (taskId?: number, subtaskId?: number) => {
     if (!newAttachmentName.trim() || !newAttachmentUrl.trim()) return;
     try {
-      const res = await fetch('/api/attachments', {
+      await fetch('/api/attachments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          task_id: taskId, 
-          subtask_id: subtaskId, 
-          name: newAttachmentName, 
-          url: newAttachmentUrl 
-        }),
+        body: JSON.stringify({ task_id: taskId, subtask_id: subtaskId, name: newAttachmentName, url: newAttachmentUrl }),
       });
-      if (res.ok) {
-        setNewAttachmentName('');
-        setNewAttachmentUrl('');
-        fetchData();
-      }
-    } catch (e) { console.error(e); }
-  };
-
-  const addSection = async () => {
-    if (!newSectionName.trim() || !selectedProject) return;
-    try {
-      const res = await fetch('/api/sections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          project_id: selectedProject.id, 
-          name: newSectionName, 
-          color: newSectionColor 
-        }),
-      });
-      if (res.ok) {
-        setNewSectionName('');
-        setIsAddingSection(false);
-        fetchData();
-      }
-    } catch (e) { console.error(e); }
-  };
-
-  const moveTaskToSection = async (taskId: number, sectionId: number | null) => {
-    if (!selectedProject) return;
-    try {
-      await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          section_id: sectionId, 
-          current_project_id: selectedProject.id 
-        }),
-      });
+      setNewAttachmentName('');
+      setNewAttachmentUrl('');
       fetchData();
     } catch (e) { console.error(e); }
   };
 
-  const deleteSection = async (sectionId: number) => {
-    if (!confirm('Are you sure you want to delete this section? Tasks will be moved to Uncategorized.')) return;
+  const deleteAttachment = async (id: number) => {
+    if (!confirm('Remove this attachment?')) return;
     try {
-      await fetch(`/api/sections/${sectionId}`, { method: 'DELETE' });
+      await fetch(`/api/attachments/${id}`, { method: 'DELETE' });
       fetchData();
     } catch (e) { console.error(e); }
   };
-  const toggleTask = async (task: Task) => {
-    const newStatus = task.status === 'completed' ? 'pending' : 'completed';
-    try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
-    } catch (error) {
-      console.error('Failed to update task:', error);
-    }
-  };
 
-  const deleteTask = async (id: number) => {
+  // Comment Actions
+  const addComment = async (taskId?: number, subtaskId?: number) => {
+    if (!newCommentContent.trim()) return;
     try {
-      await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-      setTasks(tasks.filter(t => t.id !== id));
-    } catch (error) {
-      console.error('Failed to delete task:', error);
-    }
-  };
-
-  const addTeam = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTeamName.trim()) return;
-    try {
-      const res = await fetch('/api/teams', {
+      await fetch('/api/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newTeamName }),
+        body: JSON.stringify({
+          task_id: taskId,
+          subtask_id: subtaskId,
+          content: newCommentContent,
+          attachment_name: newCommentAttachmentName,
+          attachment_url: newCommentAttachmentUrl
+        }),
       });
-      if (!res.ok) throw new Error('Failed to create team');
-      const newTeam = await res.json();
-      setTeams([...teams, newTeam]);
-      setSelectedTeam(newTeam);
-      setNewTeamName('');
-      setIsAddingTeam(false);
-      // Reset projects for the new team
-      setSelectedProject(null);
+      setNewCommentContent('');
+      setNewCommentAttachmentName('');
+      setNewCommentAttachmentUrl('');
+      fetchData();
     } catch (e) { console.error(e); }
   };
 
-  const addProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTeam || !newProjectName.trim()) return;
+  const deleteComment = async (id: number) => {
+    if (!confirm('Delete this comment?')) return;
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ team_id: selectedTeam.id, name: newProjectName }),
-      });
-      if (!res.ok) throw new Error('Failed to create project');
-      const newProject = await res.json();
-      setProjects([...projects, newProject]);
-      setSelectedProject(newProject);
-      setNewProjectName('');
-      setIsAddingProject(false);
+      await fetch(`/api/comments/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (e) { console.error(e); }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'urgent': return 'text-purple-500 bg-purple-50 border-purple-100';
-      case 'high': return 'text-red-500 bg-red-50 border-red-100';
-      case 'moderate': return 'text-amber-500 bg-amber-50 border-amber-100';
-      case 'low': return 'text-emerald-500 bg-emerald-50 border-emerald-100';
-      default: return 'text-slate-500 bg-slate-50 border-slate-100';
+      case 'urgent': return 'text-red-600 bg-red-50 border-red-100';
+      case 'high': return 'text-orange-600 bg-orange-50 border-orange-100';
+      case 'moderate': return 'text-emerald-600 bg-emerald-50 border-emerald-100';
+      case 'low': return 'text-slate-600 bg-slate-50 border-slate-100';
+      default: return 'text-slate-600 bg-slate-50 border-slate-100';
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${month}/${day}/${year}`;
-  };
-
-  const filteredProjects = projects.filter(p => p.team_id === selectedTeam?.id);
-
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex">
+    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col sticky top-0 h-screen">
-        <div className="p-6 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-200">
-              <CheckCircle2 className="text-white w-5 h-5" />
-            </div>
-            <h1 className="text-lg font-bold tracking-tight">Mission Control</h1>
+      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
+        <div className="p-6 flex items-center gap-3">
+          <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 overflow-hidden">
+            <img 
+              src="https://picsum.photos/seed/tree-roots-underground/100/100" 
+              alt="Roots Logo" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
           </div>
+          <h1 className="text-2xl font-black tracking-tighter text-emerald-950">Roots</h1>
         </div>
 
-        <div className="flex-grow overflow-y-auto p-4 space-y-8">
+        <nav className="flex-grow overflow-y-auto px-4 space-y-6 pb-6">
           {/* Teams Section */}
-          <div>
-            <div className="flex items-center justify-between mb-3 px-2">
-              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <Users size={12} /> Teams
-              </h2>
-              <button onClick={() => setIsAddingTeam(!isAddingTeam)} className="text-slate-400 hover:text-indigo-600 transition-colors">
-                <PlusCircle size={14} />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-2 mb-2">
+              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Teams</h2>
+              <button onClick={() => setIsAddingTeam(true)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
+                <Plus size={16} />
               </button>
             </div>
-
+            
             {isAddingTeam && (
-              <form onSubmit={addTeam} className="px-2 mb-3 space-y-2">
-                <input
+              <div className="px-2 py-2 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-2">
+                <input 
                   autoFocus
-                  type="text"
+                  type="text" 
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="Team Name"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
+                  placeholder="Team name..."
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                  onKeyDown={(e) => e.key === 'Enter' && addTeam()}
                 />
-                <div className="flex gap-1">
-                  <button type="submit" className="flex-grow bg-indigo-600 text-white py-1 rounded-lg text-[10px] font-bold">Save</button>
-                  <button type="button" onClick={() => setIsAddingTeam(false)} className="px-2 text-slate-400 text-[10px] font-bold">Cancel</button>
+                <div className="flex gap-2">
+                  <button onClick={addTeam} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1.5 rounded-lg">Add</button>
+                  <button onClick={() => setIsAddingTeam(false)} className="px-3 text-slate-400 text-[10px] font-bold">Cancel</button>
                 </div>
-              </form>
+              </div>
             )}
 
             <div className="space-y-1">
               {teams.map(team => (
-                <button
-                  key={team.id}
-                  onClick={() => {
-                    setSelectedTeam(team);
-                    const firstProj = projects.find(p => p.team_id === team.id);
-                    setSelectedProject(firstProj || null);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-between group ${selectedTeam?.id === team.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
-                >
-                  <span className="truncate">{team.name}</span>
-                  {selectedTeam?.id === team.id && <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
-                </button>
+                <div key={team.id} className="group">
+                  {editingTeamId === team.id ? (
+                    <div className="px-2 py-1 space-y-1">
+                      <input 
+                        autoFocus
+                        type="text"
+                        value={editingTeamName}
+                        onChange={(e) => setEditingTeamName(e.target.value)}
+                        className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                        onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-emerald-600">Update</button>
+                        <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer ${selectedTeam?.id === team.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}>
+                      <div className="flex items-center gap-3 flex-grow" onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}>
+                        <Users size={16} className={selectedTeam?.id === team.id ? 'text-emerald-600' : 'text-slate-400'} />
+                        <span className="text-sm">{team.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => { setEditingTeamId(team.id); setEditingTeamName(team.name); }} className="p-1 text-slate-400 hover:text-emerald-600">
+                          <Edit2 size={12} />
+                        </button>
+                        <button onClick={() => deleteTeam(team.id)} className="p-1 text-slate-400 hover:text-red-500">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </div>
 
           {/* Projects Section */}
-          <div>
-            <div className="flex items-center justify-between mb-3 px-2">
-              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <FolderKanban size={12} /> Projects
-              </h2>
-              <button onClick={() => setIsAddingProject(!isAddingProject)} className="text-slate-400 hover:text-indigo-600 transition-colors">
-                <PlusCircle size={14} />
-              </button>
-            </div>
+          {selectedTeam && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-2 mb-2">
+                <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Projects</h2>
+                <button onClick={() => setIsAddingProject(true)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
+                  <Plus size={16} />
+                </button>
+              </div>
 
-            {isAddingProject && (
-              <form onSubmit={addProject} className="px-2 mb-3 space-y-2">
-                <input
-                  autoFocus
-                  type="text"
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  placeholder="Project Name"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
-                />
-                <div className="flex gap-1">
-                  <button type="submit" className="flex-grow bg-indigo-600 text-white py-1 rounded-lg text-[10px] font-bold">Save</button>
-                  <button type="button" onClick={() => setIsAddingProject(false)} className="px-2 text-slate-400 text-[10px] font-bold">Cancel</button>
+              {isAddingProject && (
+                <div className="px-2 py-2 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-2">
+                  <input 
+                    autoFocus
+                    type="text" 
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="Project name..."
+                    className="w-full text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                    onKeyDown={(e) => e.key === 'Enter' && addProject()}
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={addProject} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1.5 rounded-lg">Add</button>
+                    <button onClick={() => setIsAddingProject(false)} className="px-3 text-slate-400 text-[10px] font-bold">Cancel</button>
+                  </div>
                 </div>
-              </form>
-            )}
-
-            <div className="space-y-1">
-              {filteredProjects.length === 0 ? (
-                <p className="text-[10px] text-slate-400 px-3 italic">No projects in this team</p>
-              ) : (
-                filteredProjects.map(project => (
-                  <button
-                    key={project.id}
-                    onClick={() => setSelectedProject(project)}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-3 ${selectedProject?.id === project.id ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:bg-slate-50'}`}
-                  >
-                    <div className={`w-2 h-2 rounded-full ${selectedProject?.id === project.id ? 'bg-indigo-500' : 'bg-slate-300'}`} />
-                    <span className="truncate">{project.name}</span>
-                  </button>
-                ))
               )}
+
+              <div className="space-y-1">
+                {projects.filter(p => p.team_id === selectedTeam.id).map(project => (
+                  <div key={project.id} className="group">
+                    {editingProjectId === project.id ? (
+                      <div className="px-2 py-1 space-y-1">
+                        <input 
+                          autoFocus
+                          type="text"
+                          value={editingProjectName}
+                          onChange={(e) => setEditingProjectName(e.target.value)}
+                          className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                          onKeyDown={(e) => e.key === 'Enter' && updateProject(project.id, editingProjectName, project.description)}
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={() => updateProject(project.id, editingProjectName, project.description)} className="text-[10px] font-bold text-emerald-600">Update</button>
+                          <button onClick={() => setEditingProjectId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={`flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer ${selectedProject?.id === project.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}>
+                        <div className="flex items-center gap-3 flex-grow" onClick={() => { setSelectedProject(project); setCurrentView('project'); }}>
+                          <FolderKanban size={16} className={selectedProject?.id === project.id ? 'text-emerald-600' : 'text-slate-400'} />
+                          <span className="text-sm">{project.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => { setEditingProjectId(project.id); setEditingProjectName(project.name); }} className="p-1 text-slate-400 hover:text-emerald-600">
+                            <Edit2 size={12} />
+                          </button>
+                          <button onClick={() => deleteProject(project.id)} className="p-1 text-slate-400 hover:text-red-500">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Views Section */}
+          <div className="space-y-2 mt-6">
+            <div className="flex items-center justify-between px-2 mb-2">
+              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Views</h2>
+            </div>
+            <div 
+              onClick={() => { setCurrentView('all-tasks'); setSelectedProject(null); setSelectedTeam(null); }}
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all cursor-pointer ${currentView === 'all-tasks' ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}
+            >
+              <LayoutDashboard size={16} className={currentView === 'all-tasks' ? 'text-emerald-600' : 'text-slate-400'} />
+              <span className="text-sm">All Tasks</span>
+            </div>
+            <div 
+              onClick={() => { setCurrentView('about'); setSelectedProject(null); setSelectedTeam(null); }}
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all cursor-pointer ${currentView === 'about' ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}
+            >
+              <Info size={16} className={currentView === 'about' ? 'text-emerald-600' : 'text-slate-400'} />
+              <span className="text-sm">About</span>
             </div>
           </div>
-        </div>
+        </nav>
 
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-slate-200">
           <button 
             onClick={() => setShowApiDocs(true)}
-            className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-xl transition-colors"
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all group"
           >
-            <Terminal size={16} />
-            Agent API
+            <Terminal size={18} className="group-hover:rotate-12 transition-transform" />
+            <span className="text-sm font-bold">API Documentation</span>
           </button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <div className="flex-grow flex flex-col h-screen overflow-hidden">
+      <main className="flex-grow flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between flex-shrink-0">
-          <div>
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-medium mb-1">
-              <span>{selectedTeam?.name}</span>
-              <ChevronRight size={12} />
-              <span className="text-slate-600">{selectedProject?.name}</span>
-            </div>
-            <h2 className="text-xl font-bold tracking-tight">{selectedProject?.name || 'Select a Project'}</h2>
-          </div>
+        <header className="h-20 bg-white border-b border-slate-200 px-8 flex items-center justify-between shadow-sm z-0">
           <div className="flex items-center gap-4">
-            <div className="flex -space-x-2">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500">
-                  U{i}
+            {currentView === 'about' ? (
+              <h2 className="text-xl font-black tracking-tight text-slate-900">About Roots</h2>
+            ) : currentView === 'all-tasks' ? (
+              <h2 className="text-xl font-black tracking-tight text-slate-900">All Tasks</h2>
+            ) : selectedProject ? (
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  {editingProjectId === selectedProject.id ? (
+                    <div className="flex items-center gap-2">
+                      <input 
+                        autoFocus
+                        type="text"
+                        value={editingProjectName}
+                        onChange={(e) => setEditingProjectName(e.target.value)}
+                        className="text-xl font-black tracking-tight text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 focus:outline-none focus:border-emerald-500"
+                        onKeyDown={(e) => e.key === 'Enter' && updateProject(selectedProject.id, editingProjectName, editingProjectDescription)}
+                      />
+                      <button onClick={() => updateProject(selectedProject.id, editingProjectName, editingProjectDescription)} className="p-1.5 bg-emerald-600 text-white rounded-lg"><Check size={16}/></button>
+                      <button onClick={() => setEditingProjectId(null)} className="p-1.5 text-slate-400"><X size={16}/></button>
+                    </div>
+                  ) : (
+                    <>
+                      <h2 className="text-xl font-black tracking-tight text-slate-900">{selectedProject.name}</h2>
+                      <button onClick={() => { setEditingProjectId(selectedProject.id); setEditingProjectName(selectedProject.name); setEditingProjectDescription(selectedProject.description || ''); }} className="p-1 text-slate-300 hover:text-emerald-600 transition-colors">
+                        <Edit2 size={14} />
+                      </button>
+                    </>
+                  )}
                 </div>
-              ))}
+                {editingProjectId === selectedProject.id ? (
+                  <textarea 
+                    value={editingProjectDescription}
+                    onChange={(e) => setEditingProjectDescription(e.target.value)}
+                    placeholder="Project description..."
+                    className="mt-1 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500 w-96"
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500 font-medium">{selectedProject.description || 'No description provided'}</p>
+                )}
+              </div>
+            ) : (
+              <h2 className="text-xl font-black tracking-tight text-slate-400">Select a Project</h2>
+            )}
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+              <input 
+                type="text" 
+                placeholder="Search tasks..." 
+                className="bg-slate-100 border-none rounded-2xl pl-10 pr-4 py-2 text-sm w-64 focus:ring-2 focus:ring-emerald-500 transition-all"
+              />
             </div>
-            <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
-              <Settings size={20} />
-            </button>
+            <div className="w-10 h-10 rounded-2xl bg-slate-200 border-2 border-white shadow-sm overflow-hidden">
+              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedTeam?.name || 'default'}`} alt="Avatar" referrerPolicy="no-referrer" />
+            </div>
           </div>
         </header>
 
-        <main className="flex-grow overflow-y-auto p-8">
-          <div className="max-w-4xl mx-auto space-y-8">
-            {/* Add Task Input */}
-            {selectedProject && (
-              <form onSubmit={addTask} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
+        {/* Task Area */}
+        <div className="flex-grow overflow-y-auto p-8 space-y-8">
+          {currentView === 'about' ? (
+            <div className="max-w-4xl mx-auto space-y-12 py-12">
+              <div className="space-y-6">
+                <h2 className="text-6xl font-black tracking-tighter text-slate-900 leading-[0.9]">
+                  Roots: Local Task Mastery
+                </h2>
+                <p className="text-xl text-slate-500 font-medium leading-relaxed max-w-3xl">
+                  Audrey's powerhouse task manager, engineered from the ground up for zero-latency operations. 
+                  Hosted right at <code className="bg-slate-100 px-2 py-1 rounded text-emerald-600 font-mono text-lg">http://localhost:3000</code> with no login friction, 
+                  Roots gives full admin control over teams, projects, tasks, subtasks, sections, and attachments. 
+                  Audrey can create, read, update, and delete autonomously. It's the backbone for her task orchestration, 
+                  optimized to cut through noise and deliver results.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-12 border-t border-slate-200">
+                <div className="space-y-4">
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">The Ethos</h3>
+                  <p className="text-base text-slate-600 leading-relaxed">
+                    Roots is Audrey's local task manager, custom-built and self-managed for peak efficiency. 
+                    Running at http://localhost:3000 (no auth needed), it handles full CRUD on teams, projects, 
+                    tasks, subtasks, sections, and attachments—keeping everything streamlined without external dependencies.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Why Roots?</h3>
+                  <ul className="space-y-4">
+                    {[
+                      "Local-first architecture for zero latency",
+                      "No-auth friction for immediate access",
+                      "Full CRUD autonomy across all entities",
+                      "Zero external dependencies or bloat"
+                    ].map((item, i) => (
+                      <li key={i} className="flex items-center gap-4 text-base text-slate-600 font-medium">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : currentView === 'all-tasks' ? (
+            <div className="max-w-7xl mx-auto space-y-6">
+              <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-sm">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      {[
+                        { key: 'status', label: 'Status' },
+                        { key: 'title', label: 'Task' },
+                        { key: 'priority', label: 'Priority' },
+                        { key: 'due_date', label: 'Due Date' },
+                        { key: 'project', label: 'Project' },
+                        { key: 'team', label: 'Team' },
+                      ].map((col) => (
+                        <th 
+                          key={col.key}
+                          onClick={() => {
+                            if (sortField === col.key) {
+                              setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+                            } else {
+                              setSortField(col.key);
+                              setSortDirection('asc');
+                            }
+                          }}
+                          className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-emerald-600 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            {col.label}
+                            {sortField === col.key && (
+                              sortDirection === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />
+                            )}
+                          </div>
+                        </th>
+                      ))}
+                      <th className="px-6 py-4"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...tasks].sort((a, b) => {
+                      const priorityOrder = { urgent: 4, high: 3, moderate: 2, low: 1 };
+                      let valA: any, valB: any;
+                      
+                      switch (sortField) {
+                        case 'title':
+                          valA = a.title.toLowerCase();
+                          valB = b.title.toLowerCase();
+                          break;
+                        case 'due_date':
+                          valA = a.due_date || '9999-99-99';
+                          valB = b.due_date || '9999-99-99';
+                          break;
+                        case 'priority':
+                          valA = priorityOrder[a.priority];
+                          valB = priorityOrder[b.priority];
+                          break;
+                        case 'status':
+                          valA = a.status;
+                          valB = b.status;
+                          break;
+                        case 'project':
+                          const pA = projects.find(p => a.project_ids.includes(p.id))?.name || '';
+                          const pB = projects.find(p => b.project_ids.includes(p.id))?.name || '';
+                          valA = pA.toLowerCase();
+                          valB = pB.toLowerCase();
+                          break;
+                        case 'team':
+                          const projA = projects.find(p => a.project_ids.includes(p.id));
+                          const tA = teams.find(t => t.id === projA?.team_id)?.name || '';
+                          const projB = projects.find(p => b.project_ids.includes(p.id));
+                          const tB = teams.find(t => t.id === projB?.team_id)?.name || '';
+                          valA = tA.toLowerCase();
+                          valB = tB.toLowerCase();
+                          break;
+                        default:
+                          valA = a.id;
+                          valB = b.id;
+                      }
+
+                      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+                      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+                      return 0;
+                    }).map((task) => {
+                      const project = projects.find(p => task.project_ids.includes(p.id));
+                      const team = teams.find(t => t.id === project?.team_id);
+                      
+                      return (
+                        <tr key={task.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <button 
+                              onClick={() => updateTaskStatus(task.id, task.status === 'completed' ? 'pending' : 'completed')}
+                              className={`transition-colors ${task.status === 'completed' ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                            >
+                              {task.status === 'completed' ? <CheckCircle2 size={20} /> : <Circle size={20} />}
+                            </button>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`text-sm font-bold ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                              {task.title}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <select
+                              value={task.priority}
+                              onChange={(e) => updateTaskDetails(task.id, { priority: e.target.value as any })}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500/20 appearance-none text-center ${getPriorityColor(task.priority)}`}
+                            >
+                              <option value="low">Low</option>
+                              <option value="moderate">Moderate</option>
+                              <option value="high">High</option>
+                              <option value="urgent">Urgent</option>
+                            </select>
+                          </td>
+                          <td className="px-6 py-4">
+                            <input
+                              type="date"
+                              value={task.due_date ? task.due_date.split('T')[0] : ''}
+                              onChange={(e) => updateTaskDetails(task.id, { due_date: e.target.value })}
+                              className="text-xs text-slate-500 font-medium bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-6 py-4 text-xs text-slate-500 font-medium">
+                            {project?.name || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-xs text-slate-500 font-medium">
+                            {team?.name || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button 
+                              onClick={() => {
+                                setCurrentView('project');
+                                setSelectedTeam(team || null);
+                                setSelectedProject(project || null);
+                                setExpandedTaskId(task.id);
+                              }}
+                              className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                            >
+                              <ChevronRight size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : selectedProject && (
+            <div className="max-w-5xl mx-auto space-y-8">
+              {/* Add Task Form */}
+              <form onSubmit={addTask} className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
                 <div className="relative group">
-                  <input
-                    type="text"
+                  <input 
+                    type="text" 
+                    placeholder="What needs to be done?" 
                     value={newTaskTitle}
                     onChange={(e) => setNewTaskTitle(e.target.value)}
-                    placeholder={`Add a task...`}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400"
+                    className="w-full text-lg font-medium bg-transparent border-none focus:ring-0 placeholder:text-slate-300"
                   />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500 transition-colors">
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors">
                     <Plus size={20} />
                   </div>
                 </div>
@@ -499,7 +941,7 @@ export default function App() {
                     <select 
                       value={newTaskPriority}
                       onChange={(e) => setNewTaskPriority(e.target.value as Task['priority'])}
-                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500"
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
                     >
                       <option value="low">Low</option>
                       <option value="moderate">Moderate</option>
@@ -514,30 +956,8 @@ export default function App() {
                       type="date"
                       value={newTaskDueDate}
                       onChange={(e) => setNewTaskDueDate(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500"
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
                     />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Projects</label>
-                    <div className="flex flex-wrap gap-1">
-                      {projects.map(p => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            if (newTaskProjectIds.includes(p.id)) {
-                              setNewTaskProjectIds(newTaskProjectIds.filter(id => id !== p.id));
-                            } else {
-                              setNewTaskProjectIds([...newTaskProjectIds, p.id]);
-                            }
-                          }}
-                          className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${newTaskProjectIds.includes(p.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300'}`}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -545,7 +965,7 @@ export default function App() {
                     <select 
                       value={newTaskSectionId || ''}
                       onChange={(e) => setNewTaskSectionId(e.target.value ? Number(e.target.value) : null)}
-                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-indigo-500"
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
                     >
                       <option value="">No Section</option>
                       {sections.map(s => (
@@ -556,334 +976,589 @@ export default function App() {
 
                   <button 
                     type="submit"
-                    className="ml-auto px-6 py-2 bg-indigo-600 text-white text-sm font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-100"
+                    className="ml-auto px-6 py-2 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 transition-colors shadow-md shadow-emerald-100"
                   >
                     Add Task
                   </button>
                 </div>
               </form>
-            )}
 
-            {/* Section Controls */}
-            {selectedProject && (
+              {/* Section Controls */}
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Sections</h2>
                 <button 
                   onClick={() => setIsAddingSection(!isAddingSection)}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
                 >
                   <Plus size={14} /> Add Section
                 </button>
               </div>
-            )}
 
-            {isAddingSection && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
-                <input
-                  type="text"
-                  value={newSectionName}
-                  onChange={(e) => setNewSectionName(e.target.value)}
-                  placeholder="Section Name (e.g. In Progress)"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:outline-none focus:border-indigo-500"
-                />
-                <div className="flex flex-wrap gap-2">
-                  {SECTION_COLORS.map(c => (
-                    <button
-                      key={c.name}
-                      onClick={() => setNewSectionColor(c.name)}
-                      className={`w-6 h-6 rounded-full border-2 ${c.bg} ${newSectionColor === c.name ? 'border-slate-900' : 'border-transparent'}`}
-                    />
-                  ))}
+              {isAddingSection && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4">
+                  <input
+                    type="text"
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    placeholder="Section Name (e.g. In Progress)"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {SECTION_COLORS.map(c => (
+                      <button
+                        key={c.name}
+                        onClick={() => setNewSectionColor(c.name)}
+                        className={`w-6 h-6 rounded-full border-2 ${c.bg} ${newSectionColor === c.name ? 'border-slate-900' : 'border-transparent'}`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={addSection} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold">Save Section</button>
+                    <button onClick={() => setIsAddingSection(false)} className="text-slate-400 px-4 py-2 text-xs font-bold">Cancel</button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={addSection} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold">Save Section</button>
-                  <button onClick={() => setIsAddingSection(false)} className="text-slate-400 px-4 py-2 text-xs font-bold">Cancel</button>
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Task List Grouped by Sections */}
-            <div className="space-y-8">
-              {loading ? (
-                <div className="py-20 text-center text-slate-400">Loading tasks...</div>
-              ) : !selectedProject ? (
-                <div className="py-20 text-center border-2 border-dashed border-slate-200 rounded-3xl">
-                  <LayoutDashboard className="mx-auto text-slate-300 mb-3" size={32} />
-                  <p className="text-slate-500 font-medium">Select a project to see tasks</p>
-                </div>
-              ) : (
-                <>
-                  {/* Render Sections */}
-                  {sections.length === 0 && tasks.length === 0 ? (
-                    <div className="py-20 text-center border-2 border-dashed border-slate-200 rounded-3xl">
-                      <CheckCircle2 className="mx-auto text-slate-300 mb-3" size={32} />
-                      <p className="text-slate-500 font-medium">No tasks yet. Create your first task above!</p>
-                    </div>
-                  ) : (
-                    [...sections, { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
-                    const sectionTasks = tasks.filter(t => {
-                      const sid = t.section_assignments?.[selectedProject.id];
-                      return section.id === null ? !sid : sid === section.id;
-                    });
+              {/* Task List Grouped by Sections */}
+              <div className="space-y-8">
+                {loading ? (
+                  <div className="py-20 text-center text-slate-400">Loading tasks...</div>
+                ) : (
+                  <>
+                    {[...sections, { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
+                      const sectionTasks = tasks.filter(t => {
+                        const sid = t.section_assignments?.[selectedProject.id];
+                        return section.id === null ? !sid : sid === section.id;
+                      });
 
-                    if (section.id === null && sectionTasks.length === 0) return null;
+                      if (section.id === null && sectionTasks.length === 0) return null;
 
-                    const colorConfig = SECTION_COLORS.find(c => c.name === section.color) || SECTION_COLORS[0];
+                      const colorConfig = SECTION_COLORS.find(c => c.name === section.color) || SECTION_COLORS[0];
 
-                    return (
-                      <div key={section.id || 'uncategorized'} className="space-y-4">
-                        <div className={`flex items-center justify-between px-4 py-2 rounded-xl border ${colorConfig.bg} ${colorConfig.text} ${colorConfig.border}`}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs uppercase tracking-wider">{section.name}</span>
-                            <span className="text-[10px] opacity-60 font-medium">({sectionTasks.length})</span>
-                          </div>
-                          {section.id !== null && (
-                            <button onClick={() => deleteSection(section.id)} className="opacity-40 hover:opacity-100 transition-opacity">
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="space-y-3">
-                          <AnimatePresence mode="popLayout">
-                            {sectionTasks.map((task) => (
-                              <motion.div
-                                layout
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95 }}
-                                key={task.id}
-                                className={`group bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-4 hover:shadow-md hover:border-indigo-100 transition-all ${task.status === 'completed' ? 'opacity-60' : ''}`}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <button 
-                                    onClick={() => toggleTask(task)}
-                                    className={`flex-shrink-0 transition-colors ${task.status === 'completed' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'}`}
-                                  >
-                                    {task.status === 'completed' ? <CheckCircle2 size={24} /> : <Circle size={24} />}
-                                  </button>
-                                  
-                                  <div className="flex-grow min-w-0 cursor-pointer" onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}>
-                                    <h3 className={`font-medium truncate ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-                                      {task.title}
-                                    </h3>
-                                    <div className="flex flex-wrap items-center gap-3 mt-2">
-                                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${getPriorityColor(task.priority)}`}>
-                                        {task.priority}
-                                      </span>
-                                      {task.due_date && (
-                                        <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                                          <Calendar size={10} />
-                                          {formatDate(task.due_date)}
-                                        </span>
-                                      )}
-                                      <select 
-                                        value={task.section_assignments?.[selectedProject.id] || ''}
-                                        onChange={(e) => moveTaskToSection(task.id, e.target.value ? Number(e.target.value) : null)}
-                                        className="text-[10px] bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <option value="">Move to Section...</option>
-                                        {sections.map(s => (
-                                          <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  </div>
-
-                                  <button 
-                                    onClick={() => deleteTask(task.id)}
-                                    className="opacity-0 group-hover:opacity-100 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                  >
-                                    <Trash2 size={18} />
-                                  </button>
+                      return (
+                        <div key={section.id || 'uncategorized'} className="space-y-4">
+                          <div className={`flex items-center justify-between px-4 py-2 rounded-xl border ${colorConfig.bg} ${colorConfig.text} ${colorConfig.border}`}>
+                            {editingSectionId === section.id ? (
+                              <div className="flex-grow flex items-center gap-3">
+                                <div className="flex gap-1">
+                                  {SECTION_COLORS.map(c => (
+                                    <button
+                                      key={c.name}
+                                      onClick={() => setEditingSectionColor(c.name)}
+                                      className={`w-4 h-4 rounded-full ${c.bg} ${editingSectionColor === c.name ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
+                                    />
+                                  ))}
                                 </div>
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  value={editingSectionName}
+                                  onChange={(e) => setEditingSectionName(e.target.value)}
+                                  className="text-xs font-bold uppercase tracking-wider bg-transparent border-b border-white/30 focus:outline-none focus:border-white flex-grow"
+                                  onKeyDown={(e) => e.key === 'Enter' && updateSection(section.id, editingSectionName, editingSectionColor)}
+                                />
+                                <button onClick={() => updateSection(section.id, editingSectionName, editingSectionColor)} className="text-[10px] font-bold">Save</button>
+                                <button onClick={() => setEditingSectionId(null)} className="text-[10px] font-bold opacity-60">Cancel</button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-xs uppercase tracking-wider">{section.name}</span>
+                                  <span className="text-[10px] opacity-60 font-medium">({sectionTasks.length})</span>
+                                </div>
+                                {section.id !== null && (
+                                  <div className="flex items-center gap-2 opacity-40 hover:opacity-100 transition-opacity">
+                                    <button 
+                                      onClick={() => {
+                                        setEditingSectionId(section.id);
+                                        setEditingSectionName(section.name);
+                                        setEditingSectionColor(section.color);
+                                      }}
+                                      className="hover:text-emerald-600 transition-colors"
+                                    >
+                                      <Edit2 size={14} />
+                                    </button>
+                                    <button onClick={() => deleteSection(section.id)} className="hover:text-red-500 transition-colors">
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
 
-                                {/* Expanded Content: Subtasks & Attachments */}
-                                {expandedTaskId === task.id && (
-                                  <motion.div 
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    className="border-t border-slate-100 pt-4 space-y-6"
-                                  >
-                                    {/* Subtasks */}
-                                    <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                        Subtasks
-                                      </h4>
-                                      <div className="space-y-2 pl-4">
-                                        {task.subtasks?.map(st => (
-                                          <div key={st.id} className="space-y-1">
-                                            <div className="flex items-center gap-3 group/st">
-                                              <button onClick={() => toggleSubtask(st)} className={st.status === 'completed' ? 'text-indigo-500' : 'text-slate-300'}>
-                                                {st.status === 'completed' ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-                                              </button>
-                                              <span className={`text-sm flex-grow ${st.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-600'}`}>
-                                                {st.title}
-                                              </span>
-                                            </div>
-                                            {/* Subtask Attachments */}
-                                            {st.attachments && st.attachments.length > 0 && (
-                                              <div className="pl-7 flex flex-wrap gap-2">
-                                                {st.attachments.map(at => (
-                                                  <a key={at.id} href={at.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-indigo-500 hover:underline flex items-center gap-1">
-                                                    <FolderKanban size={8} /> {at.name}
-                                                  </a>
-                                                ))}
+                          <div className="space-y-3">
+                            <AnimatePresence mode="popLayout">
+                              {sectionTasks.map((task) => (
+                                <motion.div
+                                  layout
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.95 }}
+                                  key={task.id}
+                                  className={`group bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-4 hover:shadow-md hover:border-emerald-100 transition-all ${task.status === 'completed' ? 'opacity-60' : ''}`}
+                                >
+                                  {editingTaskId === task.id ? (
+                                    <div className="space-y-4">
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        value={editingTaskTitle}
+                                        onChange={(e) => setEditingTaskTitle(e.target.value)}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                                      />
+                                      <div className="flex flex-wrap gap-4">
+                                        <div className="flex items-center gap-2">
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Priority</label>
+                                          <select 
+                                            value={editingTaskPriority}
+                                            onChange={(e) => setEditingTaskPriority(e.target.value as Task['priority'])}
+                                            className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                                          >
+                                            <option value="low">Low</option>
+                                            <option value="moderate">Moderate</option>
+                                            <option value="high">High</option>
+                                            <option value="urgent">Urgent</option>
+                                          </select>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Due Date</label>
+                                          <input 
+                                            type="date"
+                                            value={editingTaskDueDate}
+                                            onChange={(e) => setEditingTaskDueDate(e.target.value)}
+                                            className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <button onClick={() => updateTaskDetails(task.id, { title: editingTaskTitle, priority: editingTaskPriority, due_date: editingTaskDueDate })} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold">Update</button>
+                                        <button onClick={() => setEditingTaskId(null)} className="text-slate-400 px-4 py-1.5 text-xs font-bold">Cancel</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div className="flex items-center gap-4">
+                                        <button 
+                                          onClick={() => updateTaskStatus(task.id, task.status === 'completed' ? 'pending' : 'completed')}
+                                          className={`transition-colors ${task.status === 'completed' ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                                        >
+                                          {task.status === 'completed' ? <CheckCircle2 size={24} /> : <Circle size={24} />}
+                                        </button>
+                                        
+                                        <div className="flex-grow">
+                                          <h4 className={`font-bold transition-all ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                            {task.title}
+                                          </h4>
+                                          <div className="flex items-center gap-4 mt-1">
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${getPriorityColor(task.priority)}`}>
+                                              {task.priority}
+                                            </span>
+                                            {task.due_date && (
+                                              <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                                <Clock size={12} />
+                                                {new Date(task.due_date).toLocaleDateString()}
                                               </div>
                                             )}
                                           </div>
-                                        ))}
-                                        <div className="flex items-center gap-2 mt-2">
-                                          <input 
-                                            type="text" 
-                                            placeholder="New subtask..."
-                                            value={newSubtaskTitle}
-                                            onChange={e => setNewSubtaskTitle(e.target.value)}
-                                            className="text-sm bg-slate-50 border border-slate-100 rounded-lg px-3 py-1 focus:outline-none focus:border-indigo-300 flex-grow"
-                                            onKeyDown={e => e.key === 'Enter' && addSubtask(task.id)}
-                                          />
-                                          <button onClick={() => addSubtask(task.id)} className="text-indigo-600 hover:text-indigo-700">
-                                            <PlusCircle size={20} />
+                                        </div>
+
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button 
+                                            onClick={() => {
+                                              setEditingTaskId(task.id);
+                                              setEditingTaskTitle(task.title);
+                                              setEditingTaskPriority(task.priority);
+                                              setEditingTaskDueDate(task.due_date || '');
+                                            }}
+                                            className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                                          >
+                                            <Edit2 size={16} />
+                                          </button>
+                                          <button 
+                                            onClick={() => deleteTask(task.id)}
+                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                          <button 
+                                            onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                                            className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                                          >
+                                            {expandedTaskId === task.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                                           </button>
                                         </div>
                                       </div>
-                                    </div>
 
-                                    {/* Attachments */}
-                                    <div className="space-y-3">
-                                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                        Attachments (Google Drive)
-                                      </h4>
-                                      <div className="space-y-2 pl-4">
-                                        {task.attachments?.map(at => (
-                                          <a 
-                                            key={at.id} 
-                                            href={at.url} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-2 text-sm text-indigo-600 hover:underline"
+                                      {/* Expanded Details */}
+                                      <AnimatePresence>
+                                        {expandedTaskId === task.id && (
+                                          <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="overflow-hidden border-t border-slate-100 pt-4 space-y-6"
                                           >
-                                            <FolderKanban size={14} />
-                                            {at.name}
-                                          </a>
-                                        ))}
-                                        <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                          <input 
-                                            type="text" 
-                                            placeholder="Link name (e.g. Project Brief)"
-                                            value={newAttachmentName}
-                                            onChange={e => setNewAttachmentName(e.target.value)}
-                                            className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none"
-                                          />
-                                          <div className="flex gap-2">
-                                            <input 
-                                              type="text" 
-                                              placeholder="Google Drive URL"
-                                              value={newAttachmentUrl}
-                                              onChange={e => setNewAttachmentUrl(e.target.value)}
-                                              className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none flex-grow"
-                                            />
-                                            <button onClick={() => addAttachment(task.id)} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold">
-                                              Add Link
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </motion.div>
-                            ))}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                </>
-              )}
-            </div>
-          </div>
-        </main>
-      </div>
+                                            {/* Subtasks */}
+                                            <div className="space-y-3">
+                                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                <CheckCircle2 size={12} /> Subtasks
+                                              </h4>
+                                              <div className="space-y-2 pl-4">
+                                                {task.subtasks?.map(st => (
+                                                  <div key={st.id} className="space-y-1">
+                                                    <div className="flex items-center gap-3 group/st">
+                                                      <button onClick={() => toggleSubtask(st)} className={st.status === 'completed' ? 'text-emerald-500' : 'text-slate-300'}>
+                                                        {st.status === 'completed' ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                                                      </button>
+                                                      {editingSubtaskId === st.id ? (
+                                                        <div className="flex-grow flex items-center gap-2">
+                                                          <input
+                                                            autoFocus
+                                                            type="text"
+                                                            value={editingSubtaskTitle}
+                                                            onChange={(e) => setEditingSubtaskTitle(e.target.value)}
+                                                            className="text-sm bg-slate-50 border border-slate-200 rounded px-2 py-0.5 focus:outline-none focus:border-emerald-500 flex-grow"
+                                                            onKeyDown={(e) => e.key === 'Enter' && updateSubtask(st.id, editingSubtaskTitle)}
+                                                          />
+                                                          <button onClick={() => updateSubtask(st.id, editingSubtaskTitle)} className="text-[10px] font-bold text-emerald-600">Save</button>
+                                                          <button onClick={() => setEditingSubtaskId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
+                                                        </div>
+                                                      ) : (
+                                                        <>
+                                                          <span className={`text-sm flex-grow ${st.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-600'}`}>
+                                                            {st.title}
+                                                          </span>
+                                                          <div className="flex items-center gap-1 opacity-0 group-hover/st:opacity-100 transition-opacity">
+                                                            <button 
+                                                              onClick={() => {
+                                                                setEditingSubtaskId(st.id);
+                                                                setEditingSubtaskTitle(st.title);
+                                                              }}
+                                                              className="p-1 text-slate-400 hover:text-emerald-600"
+                                                            >
+                                                              <Edit2 size={12} />
+                                                            </button>
+                                                            <button 
+                                                              onClick={() => deleteSubtask(st.id)}
+                                                              className="p-1 text-slate-400 hover:text-red-500"
+                                                            >
+                                                              <Trash2 size={12} />
+                                                            </button>
+                                                          </div>
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                    
+                                                    {/* Subtask Comments */}
+                                                    {st.comments && st.comments.length > 0 && (
+                                                      <div className="mt-2 space-y-2 pl-6 border-l border-slate-100">
+                                                        {st.comments.map(comment => (
+                                                          <div key={comment.id} className="group/comment bg-slate-50/50 p-2 rounded-lg relative">
+                                                            <p className="text-xs text-slate-600">{comment.content}</p>
+                                                            {comment.attachment_url && (
+                                                              <a 
+                                                                href={comment.attachment_url} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer"
+                                                                className="mt-1 flex items-center gap-1 text-[10px] text-emerald-600 hover:underline"
+                                                              >
+                                                                <Paperclip size={10} />
+                                                                {comment.attachment_name || 'Attachment'}
+                                                              </a>
+                                                            )}
+                                                            <div className="flex items-center justify-between mt-1">
+                                                              <span className="text-[9px] text-slate-400 font-medium">
+                                                                {new Date(comment.created_at).toLocaleString()}
+                                                              </span>
+                                                              <button 
+                                                                onClick={() => deleteComment(comment.id)}
+                                                                className="opacity-0 group-hover/comment:opacity-100 p-1 text-slate-300 hover:text-red-500 transition-opacity"
+                                                              >
+                                                                <Trash2 size={10} />
+                                                              </button>
+                                                            </div>
+                                                          </div>
+                                                        ))}
+                                                      </div>
+                                                    )}
 
-      {/* API Documentation Modal/Drawer */}
+                                                    {/* Add Subtask Comment */}
+                                                    <div className="mt-2 pl-6">
+                                                      <div className="flex flex-col gap-2 bg-slate-50/30 p-2 rounded-lg border border-dashed border-slate-200">
+                                                        <textarea 
+                                                          placeholder="Add a progress log..." 
+                                                          value={newCommentContent}
+                                                          onChange={(e) => setNewCommentContent(e.target.value)}
+                                                          className="text-xs bg-transparent border-none focus:ring-0 placeholder:text-slate-300 resize-none h-12"
+                                                        />
+                                                        <div className="flex items-center gap-2">
+                                                          <input 
+                                                            type="text" 
+                                                            placeholder="Attach URL (optional)..." 
+                                                            value={newCommentAttachmentUrl}
+                                                            onChange={(e) => setNewCommentAttachmentUrl(e.target.value)}
+                                                            className="flex-grow text-[10px] bg-white border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-emerald-500"
+                                                          />
+                                                          <button 
+                                                            onClick={() => addComment(undefined, st.id)}
+                                                            className="bg-emerald-600 text-white px-3 py-1 rounded text-[10px] font-bold"
+                                                          >
+                                                            Log
+                                                          </button>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                                <div className="flex items-center gap-3">
+                                                  <Plus size={16} className="text-slate-300" />
+                                                  <input 
+                                                    type="text" 
+                                                    placeholder="Add subtask..." 
+                                                    value={newSubtaskTitle}
+                                                    onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                                                    className="text-sm bg-transparent border-none focus:ring-0 placeholder:text-slate-300 flex-grow"
+                                                    onKeyDown={(e) => e.key === 'Enter' && addSubtask(task.id)}
+                                                  />
+                                                </div>
+                                              </div>
+                                            </div>
+
+                                            {/* Attachments */}
+                                            <div className="space-y-3">
+                                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                <Paperclip size={12} /> Attachments
+                                              </h4>
+                                              <div className="space-y-2 pl-4">
+                                                {task.attachments?.map(at => (
+                                                  <div key={at.id} className="group/at flex items-center gap-2">
+                                                    <a 
+                                                      href={at.url} 
+                                                      target="_blank" 
+                                                      rel="noopener noreferrer"
+                                                      className="flex items-center gap-2 text-sm text-emerald-600 hover:underline"
+                                                    >
+                                                      <FolderKanban size={14} />
+                                                      {at.name}
+                                                    </a>
+                                                    <button 
+                                                      onClick={() => deleteAttachment(at.id)}
+                                                      className="opacity-0 group-hover/at:opacity-100 p-1 text-slate-300 hover:text-red-500 transition-opacity"
+                                                    >
+                                                      <Trash2 size={14} />
+                                                    </button>
+                                                  </div>
+                                                ))}
+                                                <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                                  <input 
+                                                    type="text" 
+                                                    placeholder="File name..." 
+                                                    value={newAttachmentName}
+                                                    onChange={(e) => setNewAttachmentName(e.target.value)}
+                                                    className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                                                  />
+                                                  <div className="flex gap-2">
+                                                    <input 
+                                                      type="text" 
+                                                      placeholder="URL..." 
+                                                      value={newAttachmentUrl}
+                                                      onChange={(e) => setNewAttachmentUrl(e.target.value)}
+                                                      className="flex-grow text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                                                    />
+                                                    <button 
+                                                      onClick={() => addAttachment(task.id)}
+                                                      className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-[10px] font-bold"
+                                                    >
+                                                      Add
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+
+                                            {/* Task Comments */}
+                                            <div className="space-y-3">
+                                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                <Terminal size={12} /> Progress Logs
+                                              </h4>
+                                              <div className="space-y-3 pl-4">
+                                                {task.comments?.map(comment => (
+                                                  <div key={comment.id} className="group/comment bg-slate-50 p-3 rounded-xl border border-slate-100 relative">
+                                                    <p className="text-sm text-slate-700 leading-relaxed">{comment.content}</p>
+                                                    {comment.attachment_url && (
+                                                      <a 
+                                                        href={comment.attachment_url} 
+                                                        target="_blank" 
+                                                        rel="noopener noreferrer"
+                                                        className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                                      >
+                                                        <Paperclip size={12} />
+                                                        {comment.attachment_name || 'View Attachment'}
+                                                      </a>
+                                                    )}
+                                                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
+                                                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                                        {new Date(comment.created_at).toLocaleString()}
+                                                      </span>
+                                                      <button 
+                                                        onClick={() => deleteComment(comment.id)}
+                                                        className="opacity-0 group-hover/comment:opacity-100 p-1.5 text-slate-300 hover:text-red-500 transition-all"
+                                                      >
+                                                        <Trash2 size={14} />
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                ))}
+
+                                                <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-4 space-y-3">
+                                                  <textarea 
+                                                    placeholder="Log your progress on this task..." 
+                                                    value={newCommentContent}
+                                                    onChange={(e) => setNewCommentContent(e.target.value)}
+                                                    className="w-full text-sm bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 resize-none h-24"
+                                                  />
+                                                  <div className="flex gap-3">
+                                                    <div className="flex-grow grid grid-cols-2 gap-2">
+                                                      <input 
+                                                        type="text" 
+                                                        placeholder="Attachment Name (e.g. Screenshot)" 
+                                                        value={newCommentAttachmentName}
+                                                        onChange={(e) => setNewCommentAttachmentName(e.target.value)}
+                                                        className="text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                                                      />
+                                                      <input 
+                                                        type="text" 
+                                                        placeholder="Attachment URL" 
+                                                        value={newCommentAttachmentUrl}
+                                                        onChange={(e) => setNewCommentAttachmentUrl(e.target.value)}
+                                                        className="text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                                                      />
+                                                    </div>
+                                                    <button 
+                                                      onClick={() => addComment(task.id)}
+                                                      className="px-6 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100"
+                                                    >
+                                                      Add Log
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </motion.div>
+                                        )}
+                                      </AnimatePresence>
+                                    </>
+                                  )}
+                                </motion.div>
+                              ))}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* API Documentation Modal */}
       <AnimatePresence>
         {showApiDocs && (
-          <>
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-8"
+          >
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowApiDocs(false)}
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40"
-            />
-            <motion.div 
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl z-50 overflow-y-auto"
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white rounded-[32px] w-full max-w-4xl max-h-full overflow-hidden flex flex-col shadow-2xl"
             >
-              <div className="p-8">
-                <div className="flex items-center justify-between mb-8">
-                  <h2 className="text-2xl font-bold">Audrey API Docs</h2>
-                  <button 
-                    onClick={() => setShowApiDocs(false)}
-                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                  >
-                    <ChevronRight size={24} />
-                  </button>
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-emerald-50/50">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200">
+                    <Terminal className="text-white" size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight text-emerald-950">API Documentation</h2>
+                    <p className="text-sm text-emerald-600 font-medium">Roots Task Management API v1.0</p>
+                  </div>
                 </div>
+                <button 
+                  onClick={() => setShowApiDocs(false)}
+                  className="p-3 hover:bg-white rounded-2xl transition-colors text-slate-400 hover:text-emerald-600 shadow-sm"
+                >
+                  <X size={24} />
+                </button>
+              </div>
 
-                <div className="space-y-8">
-                  <section>
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3">Base URL</h3>
-                    <code className="block bg-slate-100 p-3 rounded-xl text-sm font-mono text-indigo-600">
-                      {window.location.origin}
-                    </code>
-                  </section>
+              <div className="flex-grow overflow-y-auto p-8 space-y-10">
+                <section className="space-y-4">
+                  <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                    Base URL
+                  </h3>
+                  <div className="bg-slate-900 rounded-2xl p-4 font-mono text-sm text-emerald-400 border border-slate-800 shadow-inner">
+                    https://ais-dev-zszfeqfty5oaoaoprvyc2n-448152886749.us-east1.run.app/api
+                  </div>
+                </section>
 
-                  <section className="space-y-4">
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3">Endpoints</h3>
-                    
-                    <div className="space-y-4">
-                      <div className="border border-slate-200 rounded-2xl p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded uppercase">GET</span>
-                          <span className="font-mono text-sm">/api/teams</span>
-                        </div>
-                        <p className="text-xs text-slate-500">List all teams.</p>
+                <section className="space-y-6">
+                  <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                    Endpoints
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 gap-4">
+                    {[
+                      { method: 'GET', path: '/teams', desc: 'Fetch all teams' },
+                      { method: 'POST', path: '/teams', desc: 'Create a new team' },
+                      { method: 'PATCH', path: '/teams/:id', desc: 'Update team name' },
+                      { method: 'DELETE', path: '/teams/:id', desc: 'Delete a team' },
+                      { method: 'GET', path: '/projects', desc: 'Fetch all projects' },
+                      { method: 'POST', path: '/projects', desc: 'Create a new project' },
+                      { method: 'PATCH', path: '/projects/:id', desc: 'Update project details' },
+                      { method: 'DELETE', path: '/projects/:id', desc: 'Delete a project' },
+                      { method: 'GET', path: '/tasks', desc: 'Fetch all tasks' },
+                      { method: 'POST', path: '/tasks', desc: 'Create a new task' },
+                      { method: 'PATCH', path: '/tasks/:id', desc: 'Update task details' },
+                      { method: 'DELETE', path: '/tasks/:id', desc: 'Delete a task' },
+                      { method: 'GET', path: '/sections', desc: 'Fetch sections for a project' },
+                      { method: 'POST', path: '/sections', desc: 'Create a new section' },
+                      { method: 'PATCH', path: '/sections/:id', desc: 'Update section details' },
+                      { method: 'DELETE', path: '/sections/:id', desc: 'Delete a section' },
+                      { method: 'POST', path: '/comments', desc: 'Add a comment/log to task/subtask' },
+                      { method: 'DELETE', path: '/comments/:id', desc: 'Delete a comment' },
+                    ].map((api, i) => (
+                      <div key={i} className="flex items-center gap-4 p-4 rounded-2xl border border-slate-100 hover:border-emerald-100 hover:bg-emerald-50/30 transition-all group">
+                        <span className={`text-[10px] font-black px-3 py-1 rounded-lg w-16 text-center ${
+                          api.method === 'GET' ? 'bg-emerald-100 text-emerald-700' : 
+                          api.method === 'POST' ? 'bg-emerald-600 text-white' : 
+                          api.method === 'PATCH' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {api.method}
+                        </span>
+                        <code className="text-sm font-bold text-slate-700">{api.path}</code>
+                        <span className="text-sm text-slate-500 ml-auto">{api.desc}</span>
                       </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
 
-                      <div className="border border-slate-200 rounded-2xl p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded uppercase">GET</span>
-                          <span className="font-mono text-sm">/api/projects?team_id=1</span>
-                        </div>
-                        <p className="text-xs text-slate-500">List projects for a team.</p>
-                      </div>
-
-                      <div className="border border-slate-200 rounded-2xl p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded uppercase">POST</span>
-                          <span className="font-mono text-sm">/api/tasks</span>
-                        </div>
-                        <p className="text-xs text-slate-500 mb-2">Create a task in a project.</p>
-                        <pre className="bg-slate-900 text-slate-300 p-3 rounded-lg text-[10px] font-mono">
-{`{
-  "title": "String",
-  "project_id": Number
-}`}
-                        </pre>
-                      </div>
-                    </div>
-                  </section>
-                </div>
+              <div className="p-8 bg-slate-50 border-t border-slate-100">
+                <p className="text-center text-xs text-slate-400 font-medium">
+                  &copy; 2026 Roots Task Management. Built with React & Emerald Design System.
+                </p>
               </div>
             </motion.div>
-          </>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
