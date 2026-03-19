@@ -33,6 +33,7 @@ db.exec(`
     status TEXT DEFAULT 'pending',
     priority TEXT DEFAULT 'moderate',
     due_date TEXT,
+    key_result TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -88,6 +89,13 @@ db.exec(`
     FOREIGN KEY (subtask_id) REFERENCES subtasks (id) ON DELETE CASCADE
   );
 `);
+
+// Migration: Add key_result to tasks if not exists
+try {
+  db.prepare("ALTER TABLE tasks ADD COLUMN key_result TEXT").run();
+} catch (e) {
+  // Column already exists or other error
+}
 
 // Seed default data if empty
 const teamCount = db.prepare("SELECT COUNT(*) as count FROM teams").get() as { count: number };
@@ -207,15 +215,15 @@ async function startServer() {
   });
 
   app.post("/api/tasks", (req, res) => {
-    const { title, description, priority, due_date, project_ids, section_id } = req.body;
+    const { title, description, priority, due_date, key_result, project_ids, section_id } = req.body;
     if (!title) {
       return res.status(400).json({ error: "Title is required" });
     }
     
     const insertTask = db.transaction(() => {
       const info = db.prepare(
-        "INSERT INTO tasks (title, description, priority, due_date) VALUES (?, ?, ?, ?)"
-      ).run(title, description || "", priority || "moderate", due_date || null);
+        "INSERT INTO tasks (title, description, priority, due_date, key_result) VALUES (?, ?, ?, ?, ?)"
+      ).run(title, description || "", priority || "moderate", due_date || null, key_result || "");
       
       const taskId = info.lastInsertRowid;
       
@@ -238,7 +246,7 @@ async function startServer() {
 
   app.patch("/api/tasks/:id", (req, res) => {
     const { id } = req.params;
-    const { title, description, status, priority, due_date, project_ids, section_id, current_project_id } = req.body;
+    const { title, description, status, priority, due_date, key_result, project_ids, section_id, current_project_id } = req.body;
     
     const updateTask = db.transaction(() => {
       const updates: string[] = [];
@@ -249,6 +257,7 @@ async function startServer() {
       if (status !== undefined) { updates.push("status = ?"); values.push(status); }
       if (priority !== undefined) { updates.push("priority = ?"); values.push(priority); }
       if (due_date !== undefined) { updates.push("due_date = ?"); values.push(due_date); }
+      if (key_result !== undefined) { updates.push("key_result = ?"); values.push(key_result); }
       
       updates.push("updated_at = CURRENT_TIMESTAMP");
 

@@ -83,6 +83,7 @@ interface Task {
   status: 'pending' | 'completed';
   priority: 'low' | 'moderate' | 'high' | 'urgent';
   due_date: string;
+  key_result: string;
   created_at: string;
   project_ids: number[];
   section_assignments: Record<number, number>;
@@ -118,6 +119,7 @@ export default function App() {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<Task['priority']>('moderate');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [newTaskKeyResult, setNewTaskKeyResult] = useState('');
   const [newTaskProjectIds, setNewTaskProjectIds] = useState<number[]>([]);
   const [newTaskSectionId, setNewTaskSectionId] = useState<number | null>(null);
   
@@ -147,6 +149,7 @@ export default function App() {
   const [editingTaskTitle, setEditingTaskTitle] = useState('');
   const [editingTaskPriority, setEditingTaskPriority] = useState<Task['priority']>('moderate');
   const [editingTaskDueDate, setEditingTaskDueDate] = useState('');
+  const [editingTaskKeyResult, setEditingTaskKeyResult] = useState('');
 
   const [editingSubtaskId, setEditingSubtaskId] = useState<number | null>(null);
   const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('');
@@ -318,6 +321,7 @@ export default function App() {
           title: newTaskTitle,
           priority: newTaskPriority,
           due_date: newTaskDueDate,
+          key_result: newTaskKeyResult,
           project_ids: newTaskProjectIds.length > 0 ? newTaskProjectIds : (selectedProject ? [selectedProject.id] : [])
         }),
       });
@@ -334,6 +338,7 @@ export default function App() {
       setNewTaskTitle('');
       setNewTaskPriority('moderate');
       setNewTaskDueDate('');
+      setNewTaskKeyResult('');
       setNewTaskSectionId(null);
       fetchData();
     } catch (e) { console.error(e); }
@@ -781,6 +786,7 @@ export default function App() {
                       {[
                         { key: 'status', label: 'Status' },
                         { key: 'title', label: 'Task' },
+                        { key: 'key_result', label: 'Key Result' },
                         { key: 'priority', label: 'Priority' },
                         { key: 'due_date', label: 'Due Date' },
                         { key: 'project', label: 'Project' },
@@ -831,6 +837,10 @@ export default function App() {
                           valA = a.status;
                           valB = b.status;
                           break;
+                        case 'key_result':
+                          valA = (a.key_result || '').toLowerCase();
+                          valB = (b.key_result || '').toLowerCase();
+                          break;
                         case 'project':
                           const pA = projects.find(p => a.project_ids.includes(p.id))?.name || '';
                           const pB = projects.find(p => b.project_ids.includes(p.id))?.name || '';
@@ -871,6 +881,15 @@ export default function App() {
                             <span className={`text-sm font-bold ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                               {task.title}
                             </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <input
+                              type="text"
+                              value={task.key_result || ''}
+                              onChange={(e) => updateTaskDetails(task.id, { key_result: e.target.value })}
+                              placeholder="Add key result..."
+                              className="text-xs text-slate-500 font-medium bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 w-full"
+                            />
                           </td>
                           <td className="px-6 py-4">
                             <select
@@ -948,6 +967,17 @@ export default function App() {
                       <option value="high">High</option>
                       <option value="urgent">Urgent</option>
                     </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Key Result</label>
+                    <input 
+                      type="text"
+                      value={newTaskKeyResult}
+                      onChange={(e) => setNewTaskKeyResult(e.target.value)}
+                      placeholder="Manually populated..."
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 w-48"
+                    />
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -1130,9 +1160,18 @@ export default function App() {
                                             className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
                                           />
                                         </div>
+                                        <div className="flex items-center gap-2">
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Key Result</label>
+                                          <input 
+                                            type="text"
+                                            value={editingTaskKeyResult}
+                                            onChange={(e) => setEditingTaskKeyResult(e.target.value)}
+                                            className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 w-48"
+                                          />
+                                        </div>
                                       </div>
                                       <div className="flex gap-2">
-                                        <button onClick={() => updateTaskDetails(task.id, { title: editingTaskTitle, priority: editingTaskPriority, due_date: editingTaskDueDate })} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold">Update</button>
+                                        <button onClick={() => updateTaskDetails(task.id, { title: editingTaskTitle, priority: editingTaskPriority, due_date: editingTaskDueDate, key_result: editingTaskKeyResult })} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold">Update</button>
                                         <button onClick={() => setEditingTaskId(null)} className="text-slate-400 px-4 py-1.5 text-xs font-bold">Cancel</button>
                                       </div>
                                     </div>
@@ -1170,6 +1209,7 @@ export default function App() {
                                               setEditingTaskTitle(task.title);
                                               setEditingTaskPriority(task.priority);
                                               setEditingTaskDueDate(task.due_date || '');
+                                              setEditingTaskKeyResult(task.key_result || '');
                                             }}
                                             className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
                                           >
@@ -1199,6 +1239,22 @@ export default function App() {
                                             exit={{ height: 0, opacity: 0 }}
                                             className="overflow-hidden border-t border-slate-100 pt-4 space-y-6"
                                           >
+                                            {/* Key Result */}
+                                            <div className="space-y-2">
+                                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                <AlertCircle size={12} /> Key Result
+                                              </h4>
+                                              <div className="pl-4">
+                                                <input
+                                                  type="text"
+                                                  value={task.key_result || ''}
+                                                  onChange={(e) => updateTaskDetails(task.id, { key_result: e.target.value })}
+                                                  placeholder="What is the key result for this task?"
+                                                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 transition-all"
+                                                />
+                                              </div>
+                                            </div>
+
                                             {/* Subtasks */}
                                             <div className="space-y-3">
                                               <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
