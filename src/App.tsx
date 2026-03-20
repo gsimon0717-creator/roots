@@ -170,6 +170,9 @@ export default function App() {
   const [newCommentAttachmentUrl, setNewCommentAttachmentUrl] = useState('');
 
   const [showApiDocs, setShowApiDocs] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterPriority, setFilterPriority] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -749,6 +752,8 @@ export default function App() {
                   <p className="text-xs text-slate-500 font-medium">{selectedProject.description || 'No description provided'}</p>
                 )}
               </div>
+            ) : selectedTeam ? (
+              <h2 className="text-xl font-black tracking-tight text-slate-900">{selectedTeam.name}</h2>
             ) : (
               <h2 className="text-xl font-black tracking-tight text-slate-400">Select a Project</h2>
             )}
@@ -760,6 +765,8 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Search tasks..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="bg-slate-100 border-none rounded-2xl pl-10 pr-4 py-2 text-sm w-64 focus:ring-2 focus:ring-emerald-500 transition-all"
               />
             </div>
@@ -815,6 +822,46 @@ export default function App() {
             </div>
           ) : currentView === 'all-tasks' ? (
             <div className="max-w-7xl mx-auto space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Priority</label>
+                    <select 
+                      value={filterPriority}
+                      onChange={(e) => setFilterPriority(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      <option value="all">All Priorities</option>
+                      <option value="low">Low</option>
+                      <option value="moderate">Moderate</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</label>
+                    <select 
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="pending">Pending</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                </div>
+                {selectedTeam && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl border border-emerald-100">
+                    <Users size={14} />
+                    <span className="text-xs font-bold uppercase tracking-wider">Filtering by {selectedTeam.name}</span>
+                    <button onClick={() => setSelectedTeam(null)} className="hover:text-emerald-900 transition-colors">
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-sm">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -852,7 +899,28 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...tasks].sort((a, b) => {
+                    {tasks
+                      .filter(t => {
+                        // Filter by Team if selected
+                        if (selectedTeam) {
+                          const taskInTeam = projects.some(p => t.project_ids.includes(p.id) && p.team_id === selectedTeam.id);
+                          if (!taskInTeam) return false;
+                        }
+                        
+                        // Filter by Search Query
+                        if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase()) && !t.description?.toLowerCase().includes(searchQuery.toLowerCase())) {
+                          return false;
+                        }
+
+                        // Filter by Priority
+                        if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
+
+                        // Filter by Status
+                        if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+
+                        return true;
+                      })
+                      .sort((a, b) => {
                       const priorityOrder = { urgent: 4, high: 3, moderate: 2, low: 1 };
                       let valA: any, valB: any;
                       
@@ -973,7 +1041,7 @@ export default function App() {
                 </table>
               </div>
             </div>
-          ) : selectedProject && (
+          ) : currentView === 'project' && selectedProject ? (
             <div className="max-w-5xl mx-auto space-y-8">
               {/* Add Task Form */}
               <form onSubmit={addTask} className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
@@ -1091,10 +1159,17 @@ export default function App() {
                   <div className="py-20 text-center text-slate-400">Loading tasks...</div>
                 ) : (
                   <>
-                    {[...sections, { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
+                    {[...(allSections[selectedProject.id] || []), { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
                       const sectionTasks = tasks.filter(t => {
-                        if (!t.project_ids.includes(selectedProject.id)) return false;
-                        const sid = t.section_assignments?.[selectedProject.id];
+                        const projectId = Number(selectedProject.id);
+                        if (!t.project_ids.map(Number).includes(projectId)) return false;
+                        
+                        // Filter by Search Query in Project View too
+                        if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase()) && !t.description?.toLowerCase().includes(searchQuery.toLowerCase())) {
+                          return false;
+                        }
+
+                        const sid = t.section_assignments?.[projectId];
                         return section.id === null ? !sid : sid === section.id;
                       });
 
@@ -1620,6 +1695,85 @@ export default function App() {
                     })}
                   </>
                 )}
+              </div>
+            </div>
+          ) : currentView === 'project' && selectedTeam ? (
+            <div className="max-w-5xl mx-auto space-y-8">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-3xl font-black tracking-tight text-slate-900">{selectedTeam.name} Projects</h2>
+                  <p className="text-slate-500 font-medium">Select a project to view its tasks and sections</p>
+                </div>
+                <button 
+                  onClick={() => setIsAddingProject(true)}
+                  className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-all hover:scale-105 active:scale-95"
+                >
+                  <Plus size={20} />
+                  New Project
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {projects.filter(p => p.team_id === selectedTeam.id).map(project => (
+                  <button
+                    key={project.id}
+                    onClick={() => setSelectedProject(project)}
+                    className="group bg-white border border-slate-200 rounded-[32px] p-8 text-left hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-100 transition-all relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 group-hover:bg-emerald-100 transition-colors" />
+                    <div className="relative z-10">
+                      <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                        <FolderKanban size={24} />
+                      </div>
+                      <h3 className="text-xl font-black text-slate-900 mb-2 group-hover:text-emerald-700 transition-colors">{project.name}</h3>
+                      <p className="text-sm text-slate-500 font-medium line-clamp-2 mb-6">{project.description || 'No description provided.'}</p>
+                      
+                      <div className="flex items-center justify-between pt-6 border-t border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <div className="flex -space-x-2">
+                            {[1, 2, 3].map(i => (
+                              <div key={i} className="w-6 h-6 rounded-full bg-slate-200 border-2 border-white" />
+                            ))}
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Team</span>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-300 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all" />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                
+                {projects.filter(p => p.team_id === selectedTeam.id).length === 0 && (
+                  <div className="col-span-full py-20 text-center bg-slate-50 rounded-[40px] border-2 border-dashed border-slate-200">
+                    <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-sm">
+                      <FolderKanban size={40} className="text-slate-300" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">No projects yet</h3>
+                    <p className="text-slate-500 max-w-xs mx-auto mb-8">Get started by creating your first project for this team.</p>
+                    <button 
+                      onClick={() => setIsAddingProject(true)}
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold hover:border-emerald-500 hover:text-emerald-600 transition-all"
+                    >
+                      <Plus size={20} />
+                      Create Project
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-4xl mx-auto space-y-12 py-12">
+              <div className="space-y-6">
+                <h2 className="text-6xl font-black tracking-tighter text-slate-900 leading-[0.9]">
+                  Roots: Local Task Mastery
+                </h2>
+                <p className="text-xl text-slate-500 font-medium leading-relaxed max-w-3xl">
+                  Audrey's powerhouse task manager, engineered from the ground up for zero-latency operations. 
+                  Hosted right at <code className="bg-slate-100 px-2 py-1 rounded text-emerald-600 font-mono text-lg">http://localhost:3000</code> with no login friction, 
+                  Roots gives full admin control over teams, projects, tasks, subtasks, sections, and attachments. 
+                  Audrey can create, read, update, and delete autonomously. It's the backbone for her task orchestration, 
+                  optimized to cut through noise and deliver results.
+                </p>
               </div>
             </div>
           )}
