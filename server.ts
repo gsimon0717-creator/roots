@@ -160,11 +160,12 @@ async function startServer() {
 
   app.patch("/api/projects/:id", (req, res) => {
     const { id } = req.params;
-    const { name, description } = req.body;
+    const { name, description, team_id } = req.body;
     const updates: string[] = [];
     const values: any[] = [];
     if (name !== undefined) { updates.push("name = ?"); values.push(name); }
     if (description !== undefined) { updates.push("description = ?"); values.push(description); }
+    if (team_id !== undefined) { updates.push("team_id = ?"); values.push(team_id); }
     if (updates.length === 0) return res.status(400).json({ error: "No fields to update" });
     values.push(id);
     db.prepare(`UPDATE projects SET ${updates.join(", ")} WHERE id = ?`).run(...values);
@@ -356,8 +357,11 @@ async function startServer() {
   // Sections API
   app.get("/api/sections", (req, res) => {
     const { project_id } = req.query;
-    if (!project_id) return res.status(400).json({ error: "project_id is required" });
-    const sections = db.prepare("SELECT * FROM sections WHERE project_id = ? ORDER BY order_index ASC").all(project_id);
+    if (project_id) {
+      const sections = db.prepare("SELECT * FROM sections WHERE project_id = ? ORDER BY order_index ASC").all(project_id);
+      return res.json(sections);
+    }
+    const sections = db.prepare("SELECT * FROM sections ORDER BY project_id, order_index ASC").all();
     res.json(sections);
   });
 

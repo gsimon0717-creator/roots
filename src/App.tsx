@@ -110,6 +110,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
+  const [allSections, setAllSections] = useState<Record<number, Section[]>>({});
   const [loading, setLoading] = useState(true);
   
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
@@ -140,6 +141,7 @@ export default function App() {
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [editingProjectDescription, setEditingProjectDescription] = useState('');
+  const [editingProjectTeamId, setEditingProjectTeamId] = useState<number | null>(null);
   
   const [editingSectionId, setEditingSectionId] = useState<number | null>(null);
   const [editingSectionName, setEditingSectionName] = useState('');
@@ -172,24 +174,32 @@ export default function App() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [teamsRes, projectsRes, tasksRes] = await Promise.all([
+      const [teamsRes, projectsRes, tasksRes, allSectionsRes] = await Promise.all([
         fetch('/api/teams'),
         fetch('/api/projects'),
-        fetch('/api/tasks')
+        fetch('/api/tasks'),
+        fetch('/api/sections')
       ]);
       
       const teamsData = await teamsRes.json();
       const projectsData = await projectsRes.json();
       const tasksData = await tasksRes.json();
+      const allSectionsData = await allSectionsRes.json();
       
       setTeams(teamsData);
       setProjects(projectsData);
       setTasks(tasksData);
 
+      // Group sections by project_id
+      const sectionsMap = allSectionsData.reduce((acc: Record<number, Section[]>, s: Section) => {
+        if (!acc[s.project_id]) acc[s.project_id] = [];
+        acc[s.project_id].push(s);
+        return acc;
+      }, {});
+      setAllSections(sectionsMap);
+
       if (selectedProject) {
-        const sectionsRes = await fetch(`/api/sections?project_id=${selectedProject.id}`);
-        const sectionsData = await sectionsRes.json();
-        setSections(sectionsData);
+        setSections(sectionsMap[selectedProject.id] || []);
       }
     } catch (e) {
       console.error('Failed to fetch data', e);
@@ -253,12 +263,15 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
-  const updateProject = async (id: number, name: string, description: string) => {
+  const updateProject = async (id: number, name: string, description: string, team_id?: number | null) => {
     try {
+      const body: any = { name, description };
+      if (team_id !== undefined) body.team_id = team_id;
+      
       await fetch(`/api/projects/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify(body),
       });
       setEditingProjectId(null);
       fetchData();
@@ -606,10 +619,19 @@ export default function App() {
                           value={editingProjectName}
                           onChange={(e) => setEditingProjectName(e.target.value)}
                           className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                          onKeyDown={(e) => e.key === 'Enter' && updateProject(project.id, editingProjectName, project.description)}
+                          onKeyDown={(e) => e.key === 'Enter' && updateProject(project.id, editingProjectName, project.description, editingProjectTeamId)}
                         />
+                        <select
+                          value={editingProjectTeamId || ''}
+                          onChange={(e) => setEditingProjectTeamId(Number(e.target.value))}
+                          className="w-full text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                        >
+                          {teams.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
                         <div className="flex gap-2">
-                          <button onClick={() => updateProject(project.id, editingProjectName, project.description)} className="text-[10px] font-bold text-emerald-600">Update</button>
+                          <button onClick={() => updateProject(project.id, editingProjectName, project.description, editingProjectTeamId)} className="text-[10px] font-bold text-emerald-600">Update</button>
                           <button onClick={() => setEditingProjectId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
                         </div>
                       </div>
@@ -620,7 +642,7 @@ export default function App() {
                           <span className="text-sm">{project.name}</span>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditingProjectId(project.id); setEditingProjectName(project.name); }} className="p-1 text-slate-400 hover:text-emerald-600">
+                          <button onClick={() => { setEditingProjectId(project.id); setEditingProjectName(project.name); setEditingProjectTeamId(project.team_id); }} className="p-1 text-slate-400 hover:text-emerald-600">
                             <Edit2 size={12} />
                           </button>
                           <button onClick={() => deleteProject(project.id)} className="p-1 text-slate-400 hover:text-red-500">
@@ -682,21 +704,35 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   {editingProjectId === selectedProject.id ? (
                     <div className="flex items-center gap-2">
-                      <input 
-                        autoFocus
-                        type="text"
-                        value={editingProjectName}
-                        onChange={(e) => setEditingProjectName(e.target.value)}
-                        className="text-xl font-black tracking-tight text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 focus:outline-none focus:border-emerald-500"
-                        onKeyDown={(e) => e.key === 'Enter' && updateProject(selectedProject.id, editingProjectName, editingProjectDescription)}
-                      />
-                      <button onClick={() => updateProject(selectedProject.id, editingProjectName, editingProjectDescription)} className="p-1.5 bg-emerald-600 text-white rounded-lg"><Check size={16}/></button>
+                      <div className="flex flex-col gap-1">
+                        <input 
+                          autoFocus
+                          type="text"
+                          value={editingProjectName}
+                          onChange={(e) => setEditingProjectName(e.target.value)}
+                          className="text-xl font-black tracking-tight text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 focus:outline-none focus:border-emerald-500"
+                          onKeyDown={(e) => e.key === 'Enter' && updateProject(selectedProject.id, editingProjectName, editingProjectDescription, editingProjectTeamId)}
+                        />
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Team:</span>
+                          <select
+                            value={editingProjectTeamId || ''}
+                            onChange={(e) => setEditingProjectTeamId(Number(e.target.value))}
+                            className="text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 focus:outline-none focus:border-emerald-500"
+                          >
+                            {teams.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <button onClick={() => updateProject(selectedProject.id, editingProjectName, editingProjectDescription, editingProjectTeamId)} className="p-1.5 bg-emerald-600 text-white rounded-lg"><Check size={16}/></button>
                       <button onClick={() => setEditingProjectId(null)} className="p-1.5 text-slate-400"><X size={16}/></button>
                     </div>
                   ) : (
                     <>
                       <h2 className="text-xl font-black tracking-tight text-slate-900">{selectedProject.name}</h2>
-                      <button onClick={() => { setEditingProjectId(selectedProject.id); setEditingProjectName(selectedProject.name); setEditingProjectDescription(selectedProject.description || ''); }} className="p-1 text-slate-300 hover:text-emerald-600 transition-colors">
+                      <button onClick={() => { setEditingProjectId(selectedProject.id); setEditingProjectName(selectedProject.name); setEditingProjectDescription(selectedProject.description || ''); setEditingProjectTeamId(selectedProject.team_id); }} className="p-1 text-slate-300 hover:text-emerald-600 transition-colors">
                         <Edit2 size={14} />
                       </button>
                     </>
@@ -1057,6 +1093,7 @@ export default function App() {
                   <>
                     {[...sections, { id: null, name: 'Uncategorized', color: 'slate' }].map((section: any) => {
                       const sectionTasks = tasks.filter(t => {
+                        if (!t.project_ids.includes(selectedProject.id)) return false;
                         const sid = t.section_assignments?.[selectedProject.id];
                         return section.id === null ? !sid : sid === section.id;
                       });
@@ -1252,6 +1289,74 @@ export default function App() {
                                                   placeholder="What is the key result for this task?"
                                                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:outline-none focus:border-emerald-500 transition-all"
                                                 />
+                                              </div>
+                                            </div>
+
+                                            {/* Projects Management */}
+                                            <div className="space-y-3">
+                                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                <FolderKanban size={12} /> Projects & Sections
+                                              </h4>
+                                              <div className="space-y-3 pl-4">
+                                                {task.project_ids.map(pid => {
+                                                  const project = projects.find(p => p.id === pid);
+                                                  if (!project) return null;
+                                                  const projectSections = allSections[pid] || [];
+                                                  const currentSectionId = task.section_assignments?.[pid];
+                                                  
+                                                  return (
+                                                    <div key={pid} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                                      <div className="flex items-center justify-between">
+                                                        <span className="text-xs font-bold text-slate-700">{project.name}</span>
+                                                        <button 
+                                                          onClick={() => {
+                                                            const newProjectIds = task.project_ids.filter(id => id !== pid);
+                                                            updateTaskDetails(task.id, { project_ids: newProjectIds });
+                                                          }}
+                                                          className="text-[10px] font-bold text-red-500 hover:text-red-600"
+                                                        >
+                                                          Remove
+                                                        </button>
+                                                      </div>
+                                                      <div className="flex items-center gap-2">
+                                                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Section:</label>
+                                                        <select 
+                                                          value={currentSectionId || ''}
+                                                          onChange={(e) => {
+                                                            const sid = e.target.value ? parseInt(e.target.value) : null;
+                                                            updateTaskDetails(task.id, { section_id: sid, current_project_id: pid } as any);
+                                                          }}
+                                                          className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] focus:outline-none focus:border-emerald-500 flex-grow"
+                                                        >
+                                                          <option value="">No Section</option>
+                                                          {projectSections.map(s => (
+                                                            <option key={s.id} value={s.id}>{s.name}</option>
+                                                          ))}
+                                                        </select>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })}
+                                                
+                                                {/* Add to another project */}
+                                                <div className="flex items-center gap-2 mt-2">
+                                                  <Plus size={14} className="text-slate-300" />
+                                                  <select 
+                                                    value=""
+                                                    onChange={(e) => {
+                                                      const pid = parseInt(e.target.value);
+                                                      if (!task.project_ids.includes(pid)) {
+                                                        updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
+                                                      }
+                                                    }}
+                                                    className="text-[10px] bg-transparent border-none focus:ring-0 text-slate-500 font-medium cursor-pointer"
+                                                  >
+                                                    <option value="" disabled>Add to project...</option>
+                                                    {projects.filter(p => !task.project_ids.includes(p.id)).map(p => (
+                                                      <option key={p.id} value={p.id}>{p.name}</option>
+                                                    ))}
+                                                  </select>
+                                                </div>
                                               </div>
                                             </div>
 
