@@ -173,6 +173,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [showCompleted, setShowCompleted] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -362,13 +363,20 @@ export default function App() {
 
   const updateTaskStatus = async (id: number, status: 'pending' | 'completed') => {
     try {
-      await fetch(`/api/tasks/${id}`, {
+      console.log(`Updating task ${id} to ${status}`);
+      const res = await fetch(`/api/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
+      if (!res.ok) {
+        const err = await res.json();
+        console.error('Failed to update task status:', err);
+        return;
+      }
+      console.log(`Task ${id} updated successfully`);
       fetchData();
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error('Error updating task status:', e); }
   };
 
   const updateTaskDetails = async (id: number, details: Partial<Task>) => {
@@ -767,9 +775,20 @@ export default function App() {
                 placeholder="Search tasks..." 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-slate-100 border-none rounded-2xl pl-10 pr-4 py-2 text-sm w-64 focus:ring-2 focus:ring-emerald-500 transition-all"
+                className="bg-slate-100 border-none rounded-2xl pl-10 pr-4 py-2 text-sm w-48 focus:ring-2 focus:ring-emerald-500 transition-all"
               />
             </div>
+            <button
+              onClick={() => setShowCompleted(!showCompleted)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all border ${
+                showCompleted 
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                  : 'bg-slate-50 text-slate-500 border-slate-100'
+              }`}
+            >
+              {showCompleted ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+              {showCompleted ? 'Showing Completed' : 'Hiding Completed'}
+            </button>
             <div className="w-10 h-10 rounded-2xl bg-slate-200 border-2 border-white shadow-sm overflow-hidden">
               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedTeam?.name || 'default'}`} alt="Avatar" referrerPolicy="no-referrer" />
             </div>
@@ -850,6 +869,15 @@ export default function App() {
                       <option value="completed">Completed</option>
                     </select>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Show Completed</label>
+                    <button
+                      onClick={() => setShowCompleted(!showCompleted)}
+                      className={`w-10 h-5 rounded-full transition-all relative ${showCompleted ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${showCompleted ? 'left-6' : 'left-1'}`} />
+                    </button>
+                  </div>
                 </div>
                 {selectedTeam && (
                   <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl border border-emerald-100">
@@ -917,6 +945,9 @@ export default function App() {
 
                         // Filter by Status
                         if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+
+                        // Filter by Completed
+                        if (!showCompleted && t.status === 'completed') return false;
 
                         return true;
                       })
@@ -1120,12 +1151,21 @@ export default function App() {
               {/* Section Controls */}
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Sections</h2>
-                <button 
-                  onClick={() => setIsAddingSection(!isAddingSection)}
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-                >
-                  <Plus size={14} /> Add Section
-                </button>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setShowCompleted(!showCompleted)}
+                    className={`flex items-center gap-1.5 text-xs font-bold transition-colors ${showCompleted ? 'text-emerald-600' : 'text-slate-400'}`}
+                  >
+                    {showCompleted ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                    {showCompleted ? 'Showing Completed' : 'Hiding Completed'}
+                  </button>
+                  <button 
+                    onClick={() => setIsAddingSection(!isAddingSection)}
+                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Add Section
+                  </button>
+                </div>
               </div>
 
               {isAddingSection && (
@@ -1168,6 +1208,9 @@ export default function App() {
                         if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase()) && !t.description?.toLowerCase().includes(searchQuery.toLowerCase())) {
                           return false;
                         }
+
+                        // Filter by Completed
+                        if (!showCompleted && t.status === 'completed') return false;
 
                         const sid = t.section_assignments?.[projectId];
                         return section.id === null ? !sid : sid === section.id;

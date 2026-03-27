@@ -287,10 +287,13 @@ async function startServer() {
     });
 
     try {
+      console.log(`Updating task ${id} with status: ${status}`);
       updateTask();
       const updatedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+      console.log(`Updated task:`, updatedTask);
       res.json(updatedTask);
     } catch (e) {
+      console.error(`Failed to update task ${id}:`, e);
       res.status(500).json({ error: "Failed to update task" });
     }
   });
