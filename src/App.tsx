@@ -152,6 +152,7 @@ export default function App() {
   const [editingTaskPriority, setEditingTaskPriority] = useState<Task['priority']>('moderate');
   const [editingTaskDueDate, setEditingTaskDueDate] = useState('');
   const [editingTaskKeyResult, setEditingTaskKeyResult] = useState('');
+  const [editingTaskProjectIds, setEditingTaskProjectIds] = useState<number[]>([]);
 
   const [editingSubtaskId, setEditingSubtaskId] = useState<number | null>(null);
   const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('');
@@ -1047,7 +1048,27 @@ export default function App() {
                             />
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium">
-                            {project?.name || '-'}
+                            <select
+                              value={task.project_ids[0] || ''}
+                              onChange={(e) => {
+                                const newPid = Number(e.target.value);
+                                // For simplicity in this view, we'll replace the project list with the selected one
+                                // or update the first one if it exists.
+                                // The user's request implies a single project assignment context.
+                                updateTaskDetails(task.id, { project_ids: [newPid] });
+                              }}
+                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full"
+                            >
+                              <option value="" disabled>Select Project</option>
+                              {projects.filter(p => {
+                                // Only show projects from the same team if a team is selected or if we want to allow cross-team moves
+                                // Let's allow cross-team moves but maybe group them?
+                                // For now, let's just show all projects but maybe filter by team if one is selected.
+                                return selectedTeam ? p.team_id === selectedTeam.id : true;
+                              }).map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium">
                             {team?.name || '-'}
@@ -1324,9 +1345,22 @@ export default function App() {
                                             className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 w-48"
                                           />
                                         </div>
+                                        <div className="flex items-center gap-2">
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Project</label>
+                                          <select 
+                                            multiple
+                                            value={editingTaskProjectIds.map(String)}
+                                            onChange={(e) => setEditingTaskProjectIds(Array.from(e.target.selectedOptions).map((o: any) => Number(o.value)))}
+                                            className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 min-w-32"
+                                          >
+                                            {projects.filter(p => p.team_id === (selectedTeam?.id || p.team_id)).map(p => (
+                                              <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                          </select>
+                                        </div>
                                       </div>
                                       <div className="flex gap-2">
-                                        <button onClick={() => updateTaskDetails(task.id, { title: editingTaskTitle, priority: editingTaskPriority, due_date: editingTaskDueDate, key_result: editingTaskKeyResult })} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold">Update</button>
+                                        <button onClick={() => updateTaskDetails(task.id, { title: editingTaskTitle, priority: editingTaskPriority, due_date: editingTaskDueDate, key_result: editingTaskKeyResult, project_ids: editingTaskProjectIds })} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold">Update</button>
                                         <button onClick={() => setEditingTaskId(null)} className="text-slate-400 px-4 py-1.5 text-xs font-bold">Cancel</button>
                                       </div>
                                     </div>
@@ -1365,6 +1399,7 @@ export default function App() {
                                               setEditingTaskPriority(task.priority);
                                               setEditingTaskDueDate(task.due_date || '');
                                               setEditingTaskKeyResult(task.key_result || '');
+                                              setEditingTaskProjectIds(task.project_ids);
                                             }}
                                             className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
                                           >
