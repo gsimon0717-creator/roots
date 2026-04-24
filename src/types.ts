@@ -1,5 +1,12 @@
+export interface Organization {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
 export interface Team {
   id: number;
+  organization_id: number;
   name: string;
   created_at: string;
 }

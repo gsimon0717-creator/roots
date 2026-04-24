@@ -11,10 +11,18 @@ const db = new Database("tasks.db");
 
 // Initialize database
 db.exec(`
-  CREATE TABLE IF NOT EXISTS teams (
+  CREATE TABLE IF NOT EXISTS organizations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS teams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER,
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organization_id) REFERENCES organizations (id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS projects (
@@ -97,12 +105,32 @@ try {
   // Column already exists or other error
 }
 
+// Migration: Add organization_id to teams if not exists
+try {
+  db.prepare("ALTER TABLE teams ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE").run();
+} catch (e) {
+  // Already exists
+}
+
 // Seed default data if empty
+const orgCount = db.prepare("SELECT COUNT(*) as count FROM organizations").get() as { count: number };
+let defaultOrgId: any;
+if (orgCount.count === 0) {
+  const info = db.prepare("INSERT INTO organizations (name) VALUES (?)").run("Default Organization");
+  defaultOrgId = info.lastInsertRowid;
+} else {
+  const firstOrg = db.prepare("SELECT id FROM organizations LIMIT 1").get() as any;
+  defaultOrgId = firstOrg.id;
+}
+
 const teamCount = db.prepare("SELECT COUNT(*) as count FROM teams").get() as { count: number };
 if (teamCount.count === 0) {
-  const teamInfo = db.prepare("INSERT INTO teams (name) VALUES (?)").run("Personal");
+  const teamInfo = db.prepare("INSERT INTO teams (name, organization_id) VALUES (?, ?)").run("Personal", defaultOrgId);
   db.prepare("INSERT INTO projects (team_id, name, description) VALUES (?, ?, ?)")
     .run(teamInfo.lastInsertRowid, "General", "Default project for miscellaneous tasks");
+} else {
+  // Ensure existing teams have an organization_id
+  db.prepare("UPDATE teams SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
 }
 
 async function startServer() {
@@ -111,24 +139,62 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Organizations API
+  app.get("/api/organizations", (req, res) => {
+    const orgs = db.prepare("SELECT * FROM organizations ORDER BY name ASC").all();
+    res.json(orgs);
+  });
+
+  app.post("/api/organizations", (req, res) => {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    const info = db.prepare("INSERT INTO organizations (name) VALUES (?)").run(name);
+    res.status(201).json(db.prepare("SELECT * FROM organizations WHERE id = ?").get(info.lastInsertRowid));
+  });
+
+  app.patch("/api/organizations/:id", (req, res) => {
+    const { id } = req.params;
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    db.prepare("UPDATE organizations SET name = ? WHERE id = ?").run(name, id);
+    res.json(db.prepare("SELECT * FROM organizations WHERE id = ?").get(id));
+  });
+
+  app.delete("/api/organizations/:id", (req, res) => {
+    const { id } = req.params;
+    db.prepare("DELETE FROM organizations WHERE id = ?").run(id);
+    res.status(204).send();
+  });
+
   // Teams API
   app.get("/api/teams", (req, res) => {
-    const teams = db.prepare("SELECT * FROM teams ORDER BY name ASC").all();
+    const { organization_id } = req.query;
+    let teams;
+    if (organization_id) {
+      teams = db.prepare("SELECT * FROM teams WHERE organization_id = ? ORDER BY name ASC").all(organization_id);
+    } else {
+      teams = db.prepare("SELECT * FROM teams ORDER BY name ASC").all();
+    }
     res.json(teams);
   });
 
   app.post("/api/teams", (req, res) => {
-    const { name } = req.body;
-    if (!name) return res.status(400).json({ error: "Name is required" });
-    const info = db.prepare("INSERT INTO teams (name) VALUES (?)").run(name);
+    const { name, organization_id } = req.body;
+    if (!name || !organization_id) return res.status(400).json({ error: "Name and organization_id are required" });
+    const info = db.prepare("INSERT INTO teams (name, organization_id) VALUES (?, ?)").run(name, organization_id);
     res.status(201).json(db.prepare("SELECT * FROM teams WHERE id = ?").get(info.lastInsertRowid));
   });
 
   app.patch("/api/teams/:id", (req, res) => {
     const { id } = req.params;
-    const { name } = req.body;
-    if (!name) return res.status(400).json({ error: "Name is required" });
-    db.prepare("UPDATE teams SET name = ? WHERE id = ?").run(name, id);
+    const { name, organization_id } = req.body;
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+    if (organization_id !== undefined) { updates.push("organization_id = ?"); values.push(organization_id); }
+    if (updates.length === 0) return res.status(400).json({ error: "No fields to update" });
+    values.push(id);
+    db.prepare(`UPDATE teams SET ${updates.join(", ")} WHERE id = ?`).run(...values);
     res.json(db.prepare("SELECT * FROM teams WHERE id = ?").get(id));
   });
 

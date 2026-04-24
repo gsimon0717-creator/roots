@@ -24,13 +24,22 @@ import {
   Paperclip,
   Check,
   Info,
-  Maximize2
+  Maximize2,
+  AlertTriangle,
+  Building
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Types
+interface Organization {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
 interface Team {
   id: number;
+  organization_id: number;
   name: string;
   created_at: string;
 }
@@ -107,6 +116,7 @@ const SECTION_COLORS = [
 ];
 
 export default function App() {
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -114,6 +124,7 @@ export default function App() {
   const [allSections, setAllSections] = useState<Record<number, Section[]>>({});
   const [loading, setLoading] = useState(true);
   
+  const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
@@ -125,6 +136,9 @@ export default function App() {
   const [newTaskProjectIds, setNewTaskProjectIds] = useState<number[]>([]);
   const [newTaskSectionId, setNewTaskSectionId] = useState<number | null>(null);
   
+  const [newOrgName, setNewOrgName] = useState('');
+  const [isAddingOrg, setIsAddingOrg] = useState(false);
+
   const [newTeamName, setNewTeamName] = useState('');
   const [isAddingTeam, setIsAddingTeam] = useState(false);
   
@@ -174,6 +188,7 @@ export default function App() {
 
   const [showApiDocs, setShowApiDocs] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterOrphaned, setFilterOrphaned] = useState(false);
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [showCompleted, setShowCompleted] = useState(true);
@@ -181,18 +196,21 @@ export default function App() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [teamsRes, projectsRes, tasksRes, allSectionsRes] = await Promise.all([
+      const [orgsRes, teamsRes, projectsRes, tasksRes, allSectionsRes] = await Promise.all([
+        fetch('/api/organizations'),
         fetch('/api/teams'),
         fetch('/api/projects'),
         fetch('/api/tasks'),
         fetch('/api/sections')
       ]);
       
+      const orgsData = await orgsRes.json();
       const teamsData = await teamsRes.json();
       const projectsData = await projectsRes.json();
       const tasksData = await tasksRes.json();
       const allSectionsData = await allSectionsRes.json();
       
+      setOrganizations(orgsData);
       setTeams(teamsData);
       setProjects(projectsData);
       setTasks(tasksData);
@@ -208,25 +226,56 @@ export default function App() {
       if (selectedProject) {
         setSections(sectionsMap[selectedProject.id] || []);
       }
+
+      // Default org selection
+      if (!selectedOrganization && orgsData.length > 0) {
+        setSelectedOrganization(orgsData[0]);
+      }
     } catch (e) {
       console.error('Failed to fetch data', e);
     } finally {
       setLoading(false);
     }
-  }, [selectedProject]);
+  }, [selectedProject, selectedOrganization]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  // Organization Actions
+  const addOrganization = async () => {
+    if (!newOrgName.trim()) return;
+    try {
+      const res = await fetch('/api/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newOrgName }),
+      });
+      const data = await res.json();
+      setNewOrgName('');
+      setIsAddingOrg(false);
+      setSelectedOrganization(data);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteOrganization = async (id: number) => {
+    if (!confirm('Delete this organization and all its teams/projects?')) return;
+    try {
+      await fetch(`/api/organizations/${id}`, { method: 'DELETE' });
+      if (selectedOrganization?.id === id) setSelectedOrganization(null);
+      fetchData();
+    } catch (e) { console.error(e); }
+  };
+
   // Team Actions
   const addTeam = async () => {
-    if (!newTeamName.trim()) return;
+    if (!newTeamName.trim() || !selectedOrganization) return;
     try {
       await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newTeamName }),
+        body: JSON.stringify({ name: newTeamName, organization_id: selectedOrganization.id }),
       });
       setNewTeamName('');
       setIsAddingTeam(false);
@@ -515,7 +564,7 @@ export default function App() {
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* Sidebar */}
       <aside className="w-72 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
-        <div className="p-6 flex items-center gap-3">
+        <div className="p-6 pb-2 flex items-center gap-3">
           <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 overflow-hidden">
             <img 
               src="https://picsum.photos/seed/tree-roots-underground/100/100" 
@@ -525,6 +574,58 @@ export default function App() {
             />
           </div>
           <h1 className="text-2xl font-black tracking-tighter text-emerald-950">Roots</h1>
+        </div>
+
+        {/* Organization Switcher */}
+        <div className="px-6 py-4 border-b border-slate-100 mb-2">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Organization</label>
+            <button 
+              onClick={() => setIsAddingOrg(true)}
+              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+
+          {isAddingOrg && (
+            <div className="mb-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
+              <input 
+                autoFocus
+                type="text"
+                value={newOrgName}
+                onChange={(e) => setNewOrgName(e.target.value)}
+                placeholder="Company Name..."
+                className="w-full text-xs border border-emerald-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500"
+                onKeyDown={(e) => e.key === 'Enter' && addOrganization()}
+              />
+              <div className="flex gap-2">
+                <button onClick={addOrganization} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1 rounded-lg">Create</button>
+                <button onClick={() => setIsAddingOrg(false)} className="px-2 text-emerald-600 text-[10px] font-bold">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div className="relative group/org">
+            <select
+              value={selectedOrganization?.id || ''}
+              onChange={(e) => {
+                const org = organizations.find(o => o.id === Number(e.target.value));
+                if (org) {
+                  setSelectedOrganization(org);
+                  setSelectedTeam(null);
+                  setSelectedProject(null);
+                }
+              }}
+              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 cursor-pointer"
+            >
+              {organizations.map(org => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
+            <Building size={16} className="absolute left-3 top-3 text-slate-400 group-focus-within/org:text-emerald-500 transition-colors" />
+            <ChevronDown size={14} className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" />
+          </div>
         </div>
 
         <nav className="flex-grow overflow-y-auto px-4 space-y-6 pb-6">
@@ -556,7 +657,7 @@ export default function App() {
             )}
 
             <div className="space-y-1">
-              {teams.map(team => (
+              {teams.filter(t => t.organization_id === selectedOrganization?.id).map(team => (
                 <div key={team.id} className="group">
                   {editingTeamId === team.id ? (
                     <div className="px-2 py-1 space-y-1">
@@ -873,7 +974,16 @@ export default function App() {
                     </select>
                   </div>
                   <div className="flex items-center gap-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Show Completed</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Orphaned Only</label>
+                    <button
+                      onClick={() => setFilterOrphaned(!filterOrphaned)}
+                      className={`w-10 h-5 rounded-full transition-all relative ${filterOrphaned ? 'bg-amber-500' : 'bg-slate-300'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${filterOrphaned ? 'left-6' : 'left-1'}`} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Show Completed</label>
                     <button
                       onClick={() => setShowCompleted(!showCompleted)}
                       className={`w-10 h-5 rounded-full transition-all relative ${showCompleted ? 'bg-emerald-500' : 'bg-slate-300'}`}
@@ -932,6 +1042,20 @@ export default function App() {
                   <tbody>
                     {tasks
                       .filter(t => {
+                        // Filter by Organization if selected
+                        if (selectedOrganization) {
+                          const taskInOrg = projects.some(p => {
+                            if (!t.project_ids.includes(p.id)) return false;
+                            const team = teams.find(team => team.id === p.team_id);
+                            return team?.organization_id === selectedOrganization.id;
+                          });
+                          
+                          // If it's not in the org but we're filtering for orphaned, we might want to see it
+                          // but usually orphaned tasks are considered "no organization" for now.
+                          // Let's say orphaned tasks show up in ALL organizations if filtering by orphaned.
+                          if (!taskInOrg && !(filterOrphaned && t.project_ids.length === 0)) return false;
+                        }
+
                         // Filter by Team if selected
                         if (selectedTeam) {
                           const taskInTeam = projects.some(p => t.project_ids.includes(p.id) && p.team_id === selectedTeam.id);
@@ -948,6 +1072,9 @@ export default function App() {
 
                         // Filter by Status
                         if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+
+                        // Filter by Orphaned
+                        if (filterOrphaned && t.project_ids.length > 0) return false;
 
                         // Filter by Completed
                         if (!showCompleted && t.status === 'completed') return false;
@@ -1066,17 +1193,38 @@ export default function App() {
                             >
                               <option value="" disabled>Select Project</option>
                               {projects.filter(p => {
+                                // Filter by Organization
+                                const team = teams.find(t => t.id === p.team_id);
+                                if (selectedOrganization && team?.organization_id !== selectedOrganization.id) return false;
+                                
                                 // Only show projects from the same team if a team is selected or if we want to allow cross-team moves
-                                // Let's allow cross-team moves but maybe group them?
-                                // For now, let's just show all projects but maybe filter by team if one is selected.
                                 return selectedTeam ? p.team_id === selectedTeam.id : true;
                               }).map(p => (
                                 <option key={p.id} value={p.id}>{p.name}</option>
                               ))}
                             </select>
                           </td>
-                          <td className="px-6 py-4 text-xs text-slate-500 font-medium">
-                            {team?.name || '-'}
+                          <td className="px-6 py-4 text-xs text-slate-500 font-medium whitespace-nowrap">
+                            <select
+                              value={team?.id || ''}
+                              onChange={(e) => {
+                                const teamId = Number(e.target.value);
+                                const firstProject = projects.find(p => p.team_id === teamId);
+                                if (firstProject) {
+                                  // Assigning to a team via its first project for quick relocation
+                                  updateTaskDetails(task.id, { project_ids: [firstProject.id] });
+                                } else {
+                                  const tName = teams.find(t => t.id === teamId)?.name;
+                                  alert(`The "${tName}" team has no projects. Please create a project for this team first in the sidebar.`);
+                                }
+                              }}
+                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
+                            >
+                              <option value="" disabled>Unassigned</option>
+                              {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-6 py-4 text-right">
                             <button 
@@ -2077,8 +2225,16 @@ export default function App() {
                                   <div key={pid} className="flex flex-col gap-2 bg-emerald-50 p-3 rounded-xl border border-emerald-100 group/assign">
                                     <div className="flex items-center justify-between">
                                       <div className="flex flex-col">
-                                        <span className="text-xs font-bold text-emerald-700">{p.name}</span>
-                                        {t && <span className="text-[10px] font-bold text-emerald-600/50 uppercase tracking-widest">{t.name}</span>}
+                                        <div className="flex items-center gap-1.5">
+                                          <FolderKanban size={10} className="text-emerald-500" />
+                                          <span className="text-xs font-bold text-emerald-700">{p.name}</span>
+                                        </div>
+                                        {t && (
+                                          <div className="flex items-center gap-1.5 mt-0.5">
+                                            <Users size={10} className="text-emerald-400" />
+                                            <span className="text-[9px] font-bold text-emerald-600/50 uppercase tracking-widest">{t.name}</span>
+                                          </div>
+                                        )}
                                       </div>
                                       <button 
                                         onClick={() => updateTaskDetails(task.id, { project_ids: task.project_ids.filter(id => id !== pid) })}
@@ -2106,30 +2262,48 @@ export default function App() {
                                   </div>
                                 );
                               })}
+                              
                               {task.project_ids.length === 0 && (
-                                <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-center">
-                                  <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Orphaned: No Project</span>
+                                <div className="p-4 bg-amber-50 border-2 border-dashed border-amber-200 rounded-2xl text-center space-y-2">
+                                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
+                                    <AlertTriangle size={14} className="text-amber-600" />
+                                  </div>
+                                  <div>
+                                    <h5 className="text-[10px] font-black text-amber-700 uppercase tracking-wider">Unassigned Task</h5>
+                                    <p className="text-[9px] text-amber-600/70 font-medium">This task needs a home. Assign it to a team and project below.</p>
+                                  </div>
                                 </div>
                               )}
-                              <select 
-                                value=""
-                                onChange={(e) => {
-                                  const pid = Number(e.target.value);
-                                  if (!task.project_ids.includes(pid)) {
-                                    updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
-                                  }
-                                }}
-                                className="w-full text-[10px] font-bold p-3 rounded-xl border border-dashed border-slate-300 text-slate-400 hover:border-emerald-500 hover:text-emerald-600 transition-all cursor-pointer"
-                              >
-                                <option value="" disabled>Add to Project...</option>
-                                {teams.map(team => (
-                                  <optgroup key={team.id} label={team.name}>
-                                    {projects.filter(p => p.team_id === team.id).map(p => (
-                                      <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                  </optgroup>
-                                ))}
-                              </select>
+
+                              <div className="p-1 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                                <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to New Home</div>
+                                <select 
+                                  value=""
+                                  onChange={(e) => {
+                                    const pid = Number(e.target.value);
+                                    if (!task.project_ids.includes(pid)) {
+                                      updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
+                                    }
+                                  }}
+                                  className="w-full text-xs font-bold p-3 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
+                                >
+                                  <option value="" disabled>Select Team & Project...</option>
+                                  {teams.filter(t => t.organization_id === selectedOrganization?.id).map(team => {
+                                    const teamProjects = projects.filter(p => p.team_id === team.id);
+                                    return (
+                                      <optgroup key={team.id} label={`${team.name} Team`}>
+                                        {teamProjects.length > 0 ? (
+                                          teamProjects.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                          ))
+                                        ) : (
+                                          <option value="" disabled>No projects in this team</option>
+                                        )}
+                                      </optgroup>
+                                    );
+                                  })}
+                                </select>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2212,6 +2386,10 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 gap-4">
                     {[
+                      { method: 'GET', path: '/organizations', desc: 'Fetch all organizations' },
+                      { method: 'POST', path: '/organizations', desc: 'Create a new organization' },
+                      { method: 'PATCH', path: '/organizations/:id', desc: 'Update organization name' },
+                      { method: 'DELETE', path: '/organizations/:id', desc: 'Delete an organization' },
                       { method: 'GET', path: '/teams', desc: 'Fetch all teams' },
                       { method: 'POST', path: '/teams', desc: 'Create a new team' },
                       { method: 'PATCH', path: '/teams/:id', desc: 'Update team name' },
