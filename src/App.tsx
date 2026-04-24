@@ -226,11 +226,6 @@ export default function App() {
       if (selectedProject) {
         setSections(sectionsMap[selectedProject.id] || []);
       }
-
-      // Default org selection
-      if (!selectedOrganization && orgsData.length > 0) {
-        setSelectedOrganization(orgsData[0]);
-      }
     } catch (e) {
       console.error('Failed to fetch data', e);
     } finally {
@@ -608,17 +603,20 @@ export default function App() {
 
           <div className="relative group/org">
             <select
-              value={selectedOrganization?.id || ''}
+              value={selectedOrganization?.id || 'all'}
               onChange={(e) => {
-                const org = organizations.find(o => o.id === Number(e.target.value));
-                if (org) {
-                  setSelectedOrganization(org);
-                  setSelectedTeam(null);
-                  setSelectedProject(null);
+                if (e.target.value === 'all') {
+                  setSelectedOrganization(null);
+                } else {
+                  const org = organizations.find(o => o.id === Number(e.target.value));
+                  if (org) setSelectedOrganization(org);
                 }
+                setSelectedTeam(null);
+                setSelectedProject(null);
               }}
               className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 cursor-pointer"
             >
+              <option value="all">All Organizations</option>
               {organizations.map(org => (
                 <option key={org.id} value={org.id}>{org.name}</option>
               ))}
@@ -657,7 +655,7 @@ export default function App() {
             )}
 
             <div className="space-y-1">
-              {teams.filter(t => t.organization_id === selectedOrganization?.id).map(team => (
+              {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(team => (
                 <div key={team.id} className="group">
                   {editingTeamId === team.id ? (
                     <div className="px-2 py-1 space-y-1">
@@ -1050,10 +1048,9 @@ export default function App() {
                             return team?.organization_id === selectedOrganization.id;
                           });
                           
-                          // If it's not in the org but we're filtering for orphaned, we might want to see it
-                          // but usually orphaned tasks are considered "no organization" for now.
-                          // Let's say orphaned tasks show up in ALL organizations if filtering by orphaned.
-                          if (!taskInOrg && !(filterOrphaned && t.project_ids.length === 0)) return false;
+                          // If assigned to projects but none are in this organization, hide it.
+                          // Orphaned tasks (no projects) show up in all organizations.
+                          if (t.project_ids.length > 0 && !taskInOrg) return false;
                         }
 
                         // Filter by Team if selected
