@@ -449,6 +449,38 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const assignTaskToTeam = async (taskId: number, teamId: number) => {
+    try {
+      let project = projects.find(p => p.team_id === teamId);
+      if (!project) {
+        const teamName = teams.find(t => t.id === teamId)?.name || 'Team';
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            team_id: teamId, 
+            name: `${teamName} General`, 
+            description: `Default project for ${teamName}` 
+          }),
+        });
+        project = await res.json();
+      }
+      
+      if (project) {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+          // In the table view, we usually treat assignment as a move or primary home setting.
+          // For simplicity, we'll replace the project list if it was orphaned or just add to it.
+          // Given the user request, we'll replace the first project or add if empty.
+          const newProjectIds = task.project_ids.length > 0 
+            ? [project.id, ...task.project_ids.filter(id => id !== project.id)]
+            : [project.id];
+          await updateTaskDetails(taskId, { project_ids: newProjectIds });
+        }
+      }
+    } catch (e) { console.error(e); }
+  };
+
   const deleteTask = async (id: number) => {
     if (!confirm('Delete this task?')) return;
     try {
@@ -1343,23 +1375,18 @@ export default function App() {
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium whitespace-nowrap">
                             <select
                               value={team?.id || ''}
-                              onChange={(e) => {
-                                const teamId = Number(e.target.value);
-                                const firstProject = projects.find(p => p.team_id === teamId);
-                                if (firstProject) {
-                                  // Assigning to a team via its first project for quick relocation
-                                  updateTaskDetails(task.id, { project_ids: [firstProject.id] });
-                                } else {
-                                  const tName = teams.find(t => t.id === teamId)?.name;
-                                  alert(`The "${tName}" team has no projects. Please create a project for this team first in the sidebar.`);
-                                }
-                              }}
+                              onChange={(e) => assignTaskToTeam(task.id, Number(e.target.value))}
                               className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
                             >
                               <option value="" disabled>Unassigned</option>
-                              {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(t => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
-                              ))}
+                              {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(t => {
+                                const orgName = organizations.find(o => o.id === t.organization_id)?.name || 'Unassigned';
+                                return (
+                                  <option key={t.id} value={t.id}>
+                                    {t.name} {!selectedOrganization ? `(${orgName})` : ''}
+                                  </option>
+                                );
+                              })}
                             </select>
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -1795,13 +1822,20 @@ export default function App() {
                                                     className="text-[10px] bg-transparent border-none focus:ring-0 text-slate-500 font-medium cursor-pointer w-full"
                                                   >
                                                     <option value="" disabled>Add to project...</option>
-                                                    {teams.map(team => (
-                                                      <optgroup key={team.id} label={team.name}>
-                                                        {projects.filter(p => p.team_id === team.id && !task.project_ids.includes(p.id)).map(p => (
-                                                          <option key={p.id} value={p.id}>{p.name}</option>
-                                                        ))}
-                                                      </optgroup>
-                                                    ))}
+                                                    {teams
+                                                      .filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id)
+                                                      .map(team => {
+                                                        const teamProjects = projects.filter(p => p.team_id === team.id && !task.project_ids.includes(p.id));
+                                                        if (teamProjects.length === 0) return null;
+                                                        const orgName = organizations.find(o => o.id === team.organization_id)?.name || 'Unassigned';
+                                                        return (
+                                                          <optgroup key={team.id} label={`${team.name} ${!selectedOrganization ? `(${orgName})` : ''}`}>
+                                                            {teamProjects.map(p => (
+                                                              <option key={p.id} value={p.id}>{p.name}</option>
+                                                            ))}
+                                                          </optgroup>
+                                                        );
+                                                      })}
                                                   </select>
                                                 </div>
                                               </div>
@@ -2411,34 +2445,56 @@ export default function App() {
                                 </div>
                               )}
 
-                              <div className="p-1 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-                                <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to New Home</div>
-                                <select 
-                                  value=""
-                                  onChange={(e) => {
-                                    const pid = Number(e.target.value);
-                                    if (!task.project_ids.includes(pid)) {
-                                      updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
-                                    }
-                                  }}
-                                  className="w-full text-xs font-bold p-3 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
-                                >
-                                  <option value="" disabled>Select Team & Project...</option>
-                                  {teams.filter(t => t.organization_id === selectedOrganization?.id).map(team => {
-                                    const teamProjects = projects.filter(p => p.team_id === team.id);
-                                    return (
-                                      <optgroup key={team.id} label={`${team.name} Team`}>
-                                        {teamProjects.length > 0 ? (
-                                          teamProjects.map(p => (
-                                            <option key={p.id} value={p.id}>{p.name}</option>
-                                          ))
-                                        ) : (
-                                          <option value="" disabled>No projects in this team</option>
-                                        )}
-                                      </optgroup>
-                                    );
-                                  })}
-                                </select>
+                              <div className="p-1 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                                <div className="space-y-1">
+                                  <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to Team</div>
+                                  <select 
+                                    value=""
+                                    onChange={(e) => assignTaskToTeam(task.id, Number(e.target.value))}
+                                    className="w-full text-xs font-bold px-3 py-2 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
+                                  >
+                                    <option value="" disabled>Select Team...</option>
+                                    {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(t => {
+                                      const orgName = organizations.find(o => o.id === t.organization_id)?.name || 'Unassigned';
+                                      return (
+                                        <option key={t.id} value={t.id}>
+                                          {t.name} {!selectedOrganization ? `(${orgName})` : ''}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </div>
+
+                                <div className="space-y-1 border-t border-slate-200/50 pt-1">
+                                  <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Quick Project Assignment</div>
+                                  <select 
+                                    value=""
+                                    onChange={(e) => {
+                                      const pid = Number(e.target.value);
+                                      if (!task.project_ids.includes(pid)) {
+                                        updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
+                                      }
+                                    }}
+                                    className="w-full text-xs font-bold px-3 py-2 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
+                                  >
+                                    <option value="" disabled>Select Team & Project...</option>
+                                    {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(team => {
+                                      const teamProjects = projects.filter(p => p.team_id === team.id);
+                                      const orgName = organizations.find(o => o.id === team.organization_id)?.name || 'Unassigned';
+                                      return (
+                                        <optgroup key={team.id} label={`${team.name} Team ${!selectedOrganization ? `(${orgName})` : ''}`}>
+                                          {teamProjects.length > 0 ? (
+                                            teamProjects.map(p => (
+                                              <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))
+                                          ) : (
+                                            <option value="" disabled>No projects in this team</option>
+                                          )}
+                                        </optgroup>
+                                      );
+                                    })}
+                                  </select>
+                                </div>
                               </div>
                             </div>
                           </div>
