@@ -265,12 +265,23 @@ export default function App() {
 
   // Team Actions
   const addTeam = async () => {
-    if (!newTeamName.trim() || !selectedOrganization) return;
+    if (!newTeamName.trim()) return;
+    
+    let orgId = selectedOrganization?.id;
+    if (!orgId && organizations.length > 0) {
+      orgId = organizations[0].id;
+    }
+
+    if (!orgId) {
+      alert("Please create an organization first.");
+      return;
+    }
+
     try {
       await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newTeamName, organization_id: selectedOrganization.id }),
+        body: JSON.stringify({ name: newTeamName, organization_id: orgId }),
       });
       setNewTeamName('');
       setIsAddingTeam(false);
@@ -658,15 +669,38 @@ export default function App() {
               {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(team => (
                 <div key={team.id} className="group">
                   {editingTeamId === team.id ? (
-                    <div className="px-2 py-1 space-y-1">
+                    <div className="px-2 py-1 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-1">
                       <input 
                         autoFocus
                         type="text"
                         value={editingTeamName}
                         onChange={(e) => setEditingTeamName(e.target.value)}
-                        className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                        className="w-full text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
                         onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
                       />
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Organization</label>
+                        <select
+                          value={team.organization_id || ''}
+                          onChange={async (e) => {
+                            const newOrgId = Number(e.target.value);
+                            try {
+                              await fetch(`/api/teams/${team.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ organization_id: newOrgId }),
+                              });
+                              fetchData();
+                            } catch (e) { console.error(e); }
+                          }}
+                          className="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="" disabled>Select Org...</option>
+                          {organizations.map(o => (
+                            <option key={o.id} value={o.id}>{o.name}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="flex gap-2">
                         <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-emerald-600">Update</button>
                         <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
@@ -690,6 +724,31 @@ export default function App() {
                   )}
                 </div>
               ))}
+
+              {/* Unassigned Teams section when a specific org is selected */}
+              {selectedOrganization && teams.filter(t => !t.organization_id).length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <label className="text-[9px] font-bold text-amber-500 uppercase tracking-widest px-2 mb-2 block font-black">Unassigned Teams</label>
+                  {teams.filter(t => !t.organization_id).map(team => (
+                    <div key={team.id} className="group px-3 py-2 hover:bg-amber-50 rounded-xl transition-all cursor-pointer flex items-center justify-between" onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}>
+                      <div className="flex items-center gap-3 flex-grow">
+                        <Users size={16} className="text-amber-400" />
+                        <span className="text-sm text-slate-600">{team.name}</span>
+                      </div>
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setEditingTeamId(team.id); 
+                          setEditingTeamName(team.name); 
+                        }} 
+                        className="p-1 text-slate-400 hover:text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
