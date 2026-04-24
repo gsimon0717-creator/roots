@@ -128,9 +128,6 @@ if (teamCount.count === 0) {
   const teamInfo = db.prepare("INSERT INTO teams (name, organization_id) VALUES (?, ?)").run("Personal", defaultOrgId);
   db.prepare("INSERT INTO projects (team_id, name, description) VALUES (?, ?, ?)")
     .run(teamInfo.lastInsertRowid, "General", "Default project for miscellaneous tasks");
-} else {
-  // Ensure existing teams have an organization_id
-  db.prepare("UPDATE teams SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
 }
 
 async function startServer() {

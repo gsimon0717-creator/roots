@@ -8,12 +8,15 @@ It is designed to eliminate the friction of traditional task managers by providi
 ## 2. Agent Interaction & Capabilities
 Agents have full CRUD (Create, Read, Update, Delete) autonomy over all system entities. Interactions include:
 
-*   **Structure Management:** Creating and managing Organizations, Teams, and Projects. Organizations serve as the top-level container for different business entities or large silos.
+*   **Structure Management:** Creating and managing Organizations, Teams, and Projects. 
+    *   **Organizations:** Top-level containers for teams.
+    *   **Teams:** Functional units that own projects. Teams can be "Unassigned" (orphaned) if not linked to a specific organization.
+    *   **Orphaned Teams:** Any team without an organization assignment is highlighted at the top of the sidebar for immediate visibility and can be re-assigned at any time.
 *   **Workflow Organization:** Defining Sections within projects to categorize work (e.g., "Backlog", "Sprint", "Complete").
 *   **Task Orchestration:** Creating tasks with metadata including priority (Low to Urgent), due dates, and descriptive notes.
 *   **Granular Control:** Managing Subtasks for complex items and adding Comments/Logs to maintain an activity trail.
-*   **Relational Mapping:** Assigning tasks to multiple projects across different teams within the same organization. You can manage these assignments in the task drilldown view, where projects are grouped by their parent teams. 
-*   **Querying:** Using the "All Tasks" engine to aggregate data across the entire organization with complex filters (Status, Priority, Team, Completion state) and full-text search.
+*   **Relational Mapping:** Assigning tasks to multiple projects across different teams.
+*   **Querying:** Using the "All Tasks" engine with complex filters. Orphaned tasks (those without projects) appear in all organization-filtered views to ensure they are never lost.
 
 ## 3. API & Access Method
 Roots exposes a RESTful API for seamless integration. All data is persisted in a SQLite database (`tasks.db`) at the project root.
