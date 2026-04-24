@@ -1182,8 +1182,9 @@ export default function App() {
                         { key: 'key_result', label: 'Key Result' },
                         { key: 'priority', label: 'Priority' },
                         { key: 'due_date', label: 'Due Date' },
-                        { key: 'project', label: 'Project' },
+                        { key: 'organization', label: 'Organization' },
                         { key: 'team', label: 'Team' },
+                        { key: 'project', label: 'Project' },
                       ].map((col) => (
                         <th 
                           key={col.key}
@@ -1288,6 +1289,16 @@ export default function App() {
                           valA = tA.toLowerCase();
                           valB = tB.toLowerCase();
                           break;
+                        case 'organization':
+                          const paA = projects.find(p => a.project_ids.includes(p.id));
+                          const teA = teams.find(t => t.id === paA?.team_id);
+                          const oA = organizations.find(o => o.id === teA?.organization_id)?.name || '';
+                          const paB = projects.find(p => b.project_ids.includes(p.id));
+                          const teB = teams.find(t => t.id === paB?.team_id);
+                          const oB = organizations.find(o => o.id === teB?.organization_id)?.name || '';
+                          valA = oA.toLowerCase();
+                          valB = oB.toLowerCase();
+                          break;
                         default:
                           valA = a.id;
                           valB = b.id;
@@ -1347,30 +1358,20 @@ export default function App() {
                               className="text-xs text-slate-500 font-medium bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer"
                             />
                           </td>
-                          <td className="px-6 py-4 text-xs text-slate-500 font-medium">
-                            <select
-                              value={task.project_ids[0] || ''}
-                              onChange={(e) => {
-                                const newPid = Number(e.target.value);
-                                // For simplicity in this view, we'll replace the project list with the selected one
-                                // or update the first one if it exists.
-                                // The user's request implies a single project assignment context.
-                                updateTaskDetails(task.id, { project_ids: [newPid] });
-                              }}
-                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full"
-                            >
-                              <option value="" disabled>Select Project</option>
-                              {projects.filter(p => {
-                                // Filter by Organization
-                                const team = teams.find(t => t.id === p.team_id);
-                                if (selectedOrganization && team?.organization_id !== selectedOrganization.id) return false;
-                                
-                                // Only show projects from the same team if a team is selected or if we want to allow cross-team moves
-                                return selectedTeam ? p.team_id === selectedTeam.id : true;
-                              }).map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                              ))}
-                            </select>
+                          <td className="px-6 py-4 text-xs text-slate-500 font-bold whitespace-nowrap">
+                            {(() => {
+                              const project = projects.find(p => task.project_ids.includes(p.id));
+                              const team = teams.find(t => t.id === project?.team_id);
+                              const organization = organizations.find(o => o.id === team?.organization_id);
+                              return organization ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Building size={12} className="text-slate-300" />
+                                  <span>{organization.name}</span>
+                                </div>
+                              ) : (
+                                <span className="text-amber-500 italic">Unassigned</span>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium whitespace-nowrap">
                             <select
@@ -1387,6 +1388,25 @@ export default function App() {
                                   </option>
                                 );
                               })}
+                            </select>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-slate-500 font-medium">
+                            <select
+                              value={task.project_ids[0] || ''}
+                              onChange={(e) => {
+                                const newPid = Number(e.target.value);
+                                updateTaskDetails(task.id, { project_ids: [newPid] });
+                              }}
+                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full"
+                            >
+                              <option value="" disabled>Select Project</option>
+                              {projects.filter(p => {
+                                const team = teams.find(t => t.id === p.team_id);
+                                if (selectedOrganization && team?.organization_id !== selectedOrganization.id) return false;
+                                return selectedTeam ? p.team_id === selectedTeam.id : true;
+                              }).map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
                             </select>
                           </td>
                           <td className="px-6 py-4 text-right">
