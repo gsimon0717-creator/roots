@@ -23,7 +23,8 @@ import {
   ChevronUp,
   Paperclip,
   Check,
-  Info
+  Info,
+  Maximize2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -162,6 +163,7 @@ export default function App() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
+  const [viewingTaskId, setViewingTaskId] = useState<number | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [newAttachmentName, setNewAttachmentName] = useState('');
   const [newAttachmentUrl, setNewAttachmentUrl] = useState('');
@@ -1014,9 +1016,12 @@ export default function App() {
                             </button>
                           </td>
                           <td className="px-6 py-4">
-                            <span className={`text-sm font-bold ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                            <button 
+                              onClick={() => setViewingTaskId(task.id)}
+                              className={`text-sm font-bold text-left hover:text-emerald-600 transition-colors ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`}
+                            >
                               {task.title}
-                            </span>
+                            </button>
                           </td>
                           <td className="px-6 py-4">
                             <input
@@ -1075,15 +1080,10 @@ export default function App() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <button 
-                              onClick={() => {
-                                setCurrentView('project');
-                                setSelectedTeam(team || null);
-                                setSelectedProject(project || null);
-                                setExpandedTaskId(task.id);
-                              }}
+                              onClick={() => setViewingTaskId(task.id)}
                               className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
                             >
-                              <ChevronRight size={16} />
+                              <Maximize2 size={16} />
                             </button>
                           </td>
                         </tr>
@@ -1460,7 +1460,13 @@ export default function App() {
                                                   return (
                                                     <div key={pid} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
                                                       <div className="flex items-center justify-between">
-                                                        <span className="text-xs font-bold text-slate-700">{project.name}</span>
+                                                        <div className="flex flex-col">
+                                                          <span className="text-xs font-bold text-slate-700">{project.name}</span>
+                                                          {(() => {
+                                                            const t = teams.find(team => team.id === project.team_id);
+                                                            return t ? <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.name}</span> : null;
+                                                          })()}
+                                                        </div>
                                                         <button 
                                                           onClick={() => {
                                                             const newProjectIds = task.project_ids.filter(id => id !== pid);
@@ -1502,11 +1508,15 @@ export default function App() {
                                                         updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
                                                       }
                                                     }}
-                                                    className="text-[10px] bg-transparent border-none focus:ring-0 text-slate-500 font-medium cursor-pointer"
+                                                    className="text-[10px] bg-transparent border-none focus:ring-0 text-slate-500 font-medium cursor-pointer w-full"
                                                   >
                                                     <option value="" disabled>Add to project...</option>
-                                                    {projects.filter(p => !task.project_ids.includes(p.id)).map(p => (
-                                                      <option key={p.id} value={p.id}>{p.name}</option>
+                                                    {teams.map(team => (
+                                                      <optgroup key={team.id} label={team.name}>
+                                                        {projects.filter(p => p.team_id === team.id && !task.project_ids.includes(p.id)).map(p => (
+                                                          <option key={p.id} value={p.id}>{p.name}</option>
+                                                        ))}
+                                                      </optgroup>
                                                     ))}
                                                   </select>
                                                 </div>
@@ -1857,6 +1867,298 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* API Documentation Modal */}
+      <AnimatePresence>
+        {viewingTaskId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-8"
+            onClick={(e) => e.target === e.currentTarget && setViewingTaskId(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white rounded-[32px] w-full max-w-4xl max-h-full overflow-hidden flex flex-col shadow-2xl"
+            >
+              {(() => {
+                const task = tasks.find(t => t.id === viewingTaskId);
+                if (!task) return null;
+
+                const project = projects.find(p => task.project_ids.includes(p.id));
+                const team = teams.find(t => t.id === project?.team_id);
+
+                return (
+                  <>
+                    <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                      <div className="flex items-center gap-6 flex-grow">
+                        <button 
+                          onClick={() => updateTaskStatus(task.id, task.status === 'completed' ? 'pending' : 'completed')}
+                          className={`transition-colors ${task.status === 'completed' ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                        >
+                          {task.status === 'completed' ? <CheckCircle2 size={32} /> : <Circle size={32} />}
+                        </button>
+                        <div className="flex-grow">
+                          {editingTaskId === task.id ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              value={editingTaskTitle}
+                              onChange={(e) => setEditingTaskTitle(e.target.value)}
+                              onBlur={() => updateTaskDetails(task.id, { title: editingTaskTitle })}
+                              className="text-2xl font-black tracking-tight text-slate-900 bg-transparent border-none focus:ring-0 w-full"
+                            />
+                          ) : (
+                            <h2 
+                              onClick={() => {
+                                setEditingTaskId(task.id);
+                                setEditingTaskTitle(task.title);
+                                setEditingTaskPriority(task.priority);
+                                setEditingTaskDueDate(task.due_date || '');
+                                setEditingTaskKeyResult(task.key_result || '');
+                                setEditingTaskProjectIds(task.project_ids);
+                              }}
+                              className={`text-2xl font-black tracking-tight cursor-pointer hover:text-emerald-600 transition-colors ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-900'}`}
+                            >
+                              {task.title}
+                            </h2>
+                          )}
+                          <div className="flex items-center gap-4 mt-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${getPriorityColor(task.priority)}`}>
+                              {task.priority}
+                            </span>
+                            {team && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-full">{team.name}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => {
+                            if (confirm('Delete this task?')) {
+                              deleteTask(task.id);
+                              setViewingTaskId(null);
+                            }
+                          }}
+                          className="p-3 hover:bg-red-50 rounded-2xl transition-colors text-slate-400 hover:text-red-500"
+                        >
+                          <Trash2 size={24} />
+                        </button>
+                        <button 
+                          onClick={() => setViewingTaskId(null)}
+                          className="p-3 hover:bg-white rounded-2xl transition-colors text-slate-400 hover:text-emerald-600 shadow-sm"
+                        >
+                          <X size={24} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-grow overflow-y-auto p-8 grid grid-cols-1 md:grid-cols-3 gap-12">
+                      <div className="md:col-span-2 space-y-10">
+                        {/* Subtasks */}
+                        <section className="space-y-4">
+                          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <CheckCircle2 size={12} /> Subtasks Progress
+                          </h3>
+                          <div className="space-y-4 pl-4">
+                            {task.subtasks?.map(st => (
+                              <div key={st.id} className="space-y-2">
+                                <div className="flex items-center gap-3 group/st">
+                                  <button onClick={() => toggleSubtask(st)} className={st.status === 'completed' ? 'text-emerald-500' : 'text-slate-300'}>
+                                    {st.status === 'completed' ? <CheckCircle2 size={20} /> : <Circle size={20} />}
+                                  </button>
+                                  <span className={`text-sm font-medium ${st.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700'}`}>{st.title}</span>
+                                  <button onClick={() => deleteSubtask(st.id)} className="opacity-0 group-hover/st:opacity-100 p-1 text-slate-300 hover:text-red-500 transition-opacity">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                {/* Subtask logs would go here too if needed */}
+                              </div>
+                            ))}
+                            <div className="flex items-center gap-3 bg-slate-50 rounded-2xl p-3 border border-dashed border-slate-200">
+                              <Plus size={18} className="text-slate-300" />
+                              <input 
+                                type="text" 
+                                placeholder="Add a checkpoint..." 
+                                value={newSubtaskTitle}
+                                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                                className="text-sm bg-transparent border-none focus:ring-0 placeholder:text-slate-300 flex-grow"
+                                onKeyDown={(e) => e.key === 'Enter' && addSubtask(task.id)}
+                              />
+                            </div>
+                          </div>
+                        </section>
+
+                        {/* Description / Content placeholder */}
+                        <section className="space-y-4">
+                          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <Terminal size={12} /> Activity Logs
+                          </h3>
+                          <div className="space-y-4 pl-4">
+                            {task.comments?.map(comment => (
+                              <div key={comment.id} className="bg-slate-50 rounded-2xl p-4 relative group">
+                                <p className="text-sm text-slate-600 leading-relaxed">{comment.content}</p>
+                                <div className="mt-2 flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{new Date(comment.created_at).toLocaleString()}</span>
+                                  <button onClick={() => deleteComment(comment.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity">
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                            <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm space-y-4 focus-within:border-emerald-500 transition-colors">
+                              <textarea 
+                                placeholder="Write a progress log..." 
+                                value={newCommentContent}
+                                onChange={(e) => setNewCommentContent(e.target.value)}
+                                className="w-full text-sm bg-transparent border-none focus:ring-0 placeholder:text-slate-300 resize-none h-24"
+                              />
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                                <div className="flex items-center gap-2">
+                                  <Paperclip size={14} className="text-slate-300" />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Attachment URL..." 
+                                    value={newCommentAttachmentUrl}
+                                    onChange={(e) => setNewCommentAttachmentUrl(e.target.value)}
+                                    className="text-[10px] bg-slate-50 border-none rounded-lg px-2 py-1 focus:ring-1 focus:ring-emerald-500 w-32"
+                                  />
+                                </div>
+                                <button 
+                                  onClick={() => addComment(task.id)}
+                                  disabled={!newCommentContent.trim()}
+                                  className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 disabled:opacity-50 transition-all shadow-lg shadow-emerald-100"
+                                >
+                                  Log Progress
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </section>
+                      </div>
+
+                      <div className="space-y-10 border-l border-slate-100 pl-8">
+                        {/* Meta Info */}
+                        <div className="space-y-6">
+                          <div className="space-y-2">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Priority</h4>
+                            <select 
+                              value={task.priority}
+                              onChange={(e) => updateTaskDetails(task.id, { priority: e.target.value as any })}
+                              className={`w-full text-xs font-bold p-3 rounded-xl border appearance-none transition-all ${getPriorityColor(task.priority)}`}
+                            >
+                              <option value="low">Low</option>
+                              <option value="moderate">Moderate</option>
+                              <option value="high">High</option>
+                              <option value="urgent">Urgent</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Due Date</h4>
+                            <input 
+                              type="date"
+                              value={task.due_date ? task.due_date.split('T')[0] : ''}
+                              onChange={(e) => updateTaskDetails(task.id, { due_date: e.target.value })}
+                              className="w-full text-xs font-bold p-3 rounded-xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Assignments</h4>
+                            <div className="space-y-3">
+                              {task.project_ids.map(pid => {
+                                const p = projects.find(proj => proj.id === pid);
+                                if (!p) return null;
+                                const t = teams.find(team => team.id === p.team_id);
+                                return (
+                                  <div key={pid} className="flex flex-col gap-2 bg-emerald-50 p-3 rounded-xl border border-emerald-100 group/assign">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-bold text-emerald-700">{p.name}</span>
+                                        {t && <span className="text-[10px] font-bold text-emerald-600/50 uppercase tracking-widest">{t.name}</span>}
+                                      </div>
+                                      <button 
+                                        onClick={() => updateTaskDetails(task.id, { project_ids: task.project_ids.filter(id => id !== pid) })}
+                                        className="text-emerald-400 hover:text-red-500 transition-colors"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <label className="text-[9px] font-bold text-emerald-600/40 uppercase tracking-wider">Section:</label>
+                                      <select 
+                                        value={task.section_assignments?.[pid] || ''}
+                                        onChange={(e) => {
+                                          const sid = e.target.value ? parseInt(e.target.value) : null;
+                                          updateTaskDetails(task.id, { section_id: sid, current_project_id: pid } as any);
+                                        }}
+                                        className="bg-white border border-emerald-100 rounded px-2 py-1 text-[10px] text-emerald-700 focus:outline-none focus:border-emerald-500 flex-grow"
+                                      >
+                                        <option value="">No Section</option>
+                                        {(allSections[pid] || []).map(s => (
+                                          <option key={s.id} value={s.id}>{s.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {task.project_ids.length === 0 && (
+                                <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-center">
+                                  <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Orphaned: No Project</span>
+                                </div>
+                              )}
+                              <select 
+                                value=""
+                                onChange={(e) => {
+                                  const pid = Number(e.target.value);
+                                  if (!task.project_ids.includes(pid)) {
+                                    updateTaskDetails(task.id, { project_ids: [...task.project_ids, pid] });
+                                  }
+                                }}
+                                className="w-full text-[10px] font-bold p-3 rounded-xl border border-dashed border-slate-300 text-slate-400 hover:border-emerald-500 hover:text-emerald-600 transition-all cursor-pointer"
+                              >
+                                <option value="" disabled>Add to Project...</option>
+                                {teams.map(team => (
+                                  <optgroup key={team.id} label={team.name}>
+                                    {projects.filter(p => p.team_id === team.id).map(p => (
+                                      <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                  </optgroup>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick Actions */}
+                        <div className="pt-8 border-t border-slate-100">
+                          <button 
+                            onClick={() => {
+                              setCurrentView('project');
+                              setSelectedProject(project || null);
+                              setSelectedTeam(team || null);
+                              setExpandedTaskId(task.id);
+                              setViewingTaskId(null);
+                            }}
+                            className="w-full flex items-center justify-center gap-2 p-4 bg-slate-900 text-white rounded-2xl text-sm font-bold shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95"
+                          >
+                            <FolderKanban size={18} />
+                            Go to Project View
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* API Documentation Modal */}
       <AnimatePresence>

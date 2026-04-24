@@ -12,7 +12,7 @@ Agents have full CRUD (Create, Read, Update, Delete) autonomy over all system en
 *   **Workflow Organization:** Defining Sections within projects to categorize work (e.g., "Backlog", "Sprint", "Complete").
 *   **Task Orchestration:** Creating tasks with metadata including priority (Low to Urgent), due dates, and descriptive notes.
 *   **Granular Control:** Managing Subtasks for complex items and adding Comments/Logs to maintain an activity trail.
-*   **Relational Mapping:** Assigning tasks to single or multiple projects and moving them between teams or projects as priorities shift.
+*   **Relational Mapping:** Assigning tasks to multiple projects across different teams. You can manage these assignments in the task drilldown view, where projects are grouped by their parent teams. Moving tasks between teams is as simple as adding a project from the destination team.
 *   **Querying:** Using the "All Tasks" engine to aggregate data across the entire system with complex filters (Status, Priority, Team, Completion state) and full-text search.
 
 ## 3. API & Access Method
