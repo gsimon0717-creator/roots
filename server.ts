@@ -179,9 +179,20 @@ async function startServer() {
   });
 
   app.post("/api/teams", (req, res) => {
-    const { name, organization_id } = req.body;
-    if (!name || !organization_id) return res.status(400).json({ error: "Name and organization_id are required" });
-    const info = db.prepare("INSERT INTO teams (name, organization_id) VALUES (?, ?)").run(name, organization_id);
+    const { name } = req.body;
+    let { organization_id } = req.body;
+    
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    
+    // Fallback to first organization if not provided
+    if (!organization_id) {
+      const firstOrg = db.prepare("SELECT id FROM organizations LIMIT 1").get() as any;
+      if (firstOrg) {
+        organization_id = firstOrg.id;
+      }
+    }
+    
+    const info = db.prepare("INSERT INTO teams (name, organization_id) VALUES (?, ?)").run(name, organization_id || null);
     res.status(201).json(db.prepare("SELECT * FROM teams WHERE id = ?").get(info.lastInsertRowid));
   });
 

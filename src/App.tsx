@@ -638,115 +638,192 @@ export default function App() {
         </div>
 
         <nav className="flex-grow overflow-y-auto px-4 space-y-6 pb-6">
-          {/* Teams Section */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between px-2 mb-2">
-              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Teams</h2>
-              <button onClick={() => setIsAddingTeam(true)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
-                <Plus size={16} />
-              </button>
-            </div>
-            
-            {isAddingTeam && (
-              <div className="px-2 py-2 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-2">
-                <input 
-                  autoFocus
-                  type="text" 
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="Team name..."
-                  className="w-full text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
-                  onKeyDown={(e) => e.key === 'Enter' && addTeam()}
-                />
-                <div className="flex gap-2">
-                  <button onClick={addTeam} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1.5 rounded-lg">Add</button>
-                  <button onClick={() => setIsAddingTeam(false)} className="px-3 text-slate-400 text-[10px] font-bold">Cancel</button>
+          {/* Organization & Teams Hierarchy */}
+          <div className="space-y-6">
+            {(selectedOrganization ? [selectedOrganization] : organizations).map(org => {
+              const orgTeams = teams.filter(t => t.organization_id === org.id);
+              return (
+                <div key={org.id} className="space-y-2">
+                  <div className="flex items-center justify-between px-2 group/org-header">
+                    <div className="flex items-center gap-2">
+                      <Building size={12} className="text-slate-400" />
+                      <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{org.name}</h2>
+                    </div>
+                    {!selectedOrganization && (
+                      <button 
+                        onClick={() => deleteOrganization(org.id)}
+                        className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover/org-header:opacity-100 transition-opacity"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-1">
+                    {orgTeams.map(team => (
+                      <div key={team.id} className="group">
+                        {editingTeamId === team.id ? (
+                          <div className="px-2 py-1 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-1">
+                            <input 
+                              autoFocus
+                              type="text"
+                              value={editingTeamName}
+                              onChange={(e) => setEditingTeamName(e.target.value)}
+                              className="w-full text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                              onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
+                            />
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Organization</label>
+                              <select
+                                value={team.organization_id || ''}
+                                onChange={async (e) => {
+                                  const newOrgId = e.target.value ? Number(e.target.value) : null;
+                                  try {
+                                    await fetch(`/api/teams/${team.id}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ organization_id: newOrgId }),
+                                    });
+                                    fetchData();
+                                  } catch (e) { console.error(e); }
+                                }}
+                                className="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+                              >
+                                <option value="">No Organization (Unassigned)</option>
+                                {organizations.map(o => (
+                                  <option key={o.id} value={o.id}>{o.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-emerald-600">Update</button>
+                              <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className={`flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer group/team ${selectedTeam?.id === team.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}>
+                            <div className="flex items-center gap-3 flex-grow" onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}>
+                              <Users size={16} className={selectedTeam?.id === team.id ? 'text-emerald-600' : 'text-slate-400'} />
+                              <span className="text-sm">{team.name}</span>
+                            </div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover/team:opacity-100 transition-opacity">
+                              <button onClick={() => { setEditingTeamId(team.id); setEditingTeamName(team.name); }} className="p-1 text-slate-400 hover:text-emerald-600">
+                                <Edit2 size={12} />
+                              </button>
+                              <button onClick={() => deleteTeam(team.id)} className="p-1 text-slate-400 hover:text-red-500">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {orgTeams.length === 0 && (
+                      <div className="px-3 py-2 text-[10px] text-slate-400 italic">No teams in this organization</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Unassigned Teams Section */}
+            {teams.some(t => !t.organization_id) && (
+              <div className="space-y-2 pt-4 border-t border-slate-100">
+                <div className="flex items-center gap-2 px-2">
+                  <AlertTriangle size={12} className="text-amber-500" />
+                  <label className="text-[10px] font-black text-amber-500 uppercase tracking-widest leading-none">Unassigned Teams</label>
+                </div>
+                <div className="space-y-1">
+                  {teams.filter(t => !t.organization_id).map(team => (
+                    <div key={team.id} className="group">
+                      {editingTeamId === team.id ? (
+                        <div className="px-2 py-1 space-y-2 bg-amber-50 rounded-xl border border-amber-100 mb-1">
+                          <input 
+                            autoFocus
+                            type="text"
+                            value={editingTeamName}
+                            onChange={(e) => setEditingTeamName(e.target.value)}
+                            className="w-full text-sm bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:border-amber-500"
+                            onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
+                          />
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black text-amber-600 uppercase tracking-widest pl-1">Assign to Organization</label>
+                            <select
+                              value=""
+                              onChange={async (e) => {
+                                const newOrgId = Number(e.target.value);
+                                try {
+                                  await fetch(`/api/teams/${team.id}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ organization_id: newOrgId }),
+                                  });
+                                  fetchData();
+                                } catch (e) { console.error(e); }
+                              }}
+                              className="w-full text-xs bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:border-amber-500"
+                            >
+                              <option value="" disabled>Select...</option>
+                              {organizations.map(o => (
+                                <option key={o.id} value={o.id}>{o.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-amber-700">Update</button>
+                            <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div 
+                          onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}
+                          className="flex items-center justify-between px-3 py-2 hover:bg-amber-50 rounded-xl transition-all cursor-pointer group/team"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Users size={16} className="text-amber-400" />
+                            <span className="text-sm font-medium text-slate-600">{team.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setEditingTeamId(team.id); setEditingTeamName(team.name); }}
+                              className="p-1 text-slate-400 hover:text-amber-600 transition-colors"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
-            <div className="space-y-1">
-              {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(team => (
-                <div key={team.id} className="group">
-                  {editingTeamId === team.id ? (
-                    <div className="px-2 py-1 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-1">
-                      <input 
-                        autoFocus
-                        type="text"
-                        value={editingTeamName}
-                        onChange={(e) => setEditingTeamName(e.target.value)}
-                        className="w-full text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                        onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
-                      />
-                      <div className="space-y-1">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Organization</label>
-                        <select
-                          value={team.organization_id || ''}
-                          onChange={async (e) => {
-                            const newOrgId = Number(e.target.value);
-                            try {
-                              await fetch(`/api/teams/${team.id}`, {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ organization_id: newOrgId }),
-                              });
-                              fetchData();
-                            } catch (e) { console.error(e); }
-                          }}
-                          className="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                        >
-                          <option value="" disabled>Select Org...</option>
-                          {organizations.map(o => (
-                            <option key={o.id} value={o.id}>{o.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-emerald-600">Update</button>
-                        <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className={`flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer ${selectedTeam?.id === team.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}>
-                      <div className="flex items-center gap-3 flex-grow" onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}>
-                        <Users size={16} className={selectedTeam?.id === team.id ? 'text-emerald-600' : 'text-slate-400'} />
-                        <span className="text-sm">{team.name}</span>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditingTeamId(team.id); setEditingTeamName(team.name); }} className="p-1 text-slate-400 hover:text-emerald-600">
-                          <Edit2 size={12} />
-                        </button>
-                        <button onClick={() => deleteTeam(team.id)} className="p-1 text-slate-400 hover:text-red-500">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* Unassigned Teams section when a specific org is selected */}
-              {selectedOrganization && teams.filter(t => !t.organization_id).length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  <label className="text-[9px] font-bold text-amber-500 uppercase tracking-widest px-2 mb-2 block font-black">Unassigned Teams</label>
-                  {teams.filter(t => !t.organization_id).map(team => (
-                    <div key={team.id} className="group px-3 py-2 hover:bg-amber-50 rounded-xl transition-all cursor-pointer flex items-center justify-between" onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}>
-                      <div className="flex items-center gap-3 flex-grow">
-                        <Users size={16} className="text-amber-400" />
-                        <span className="text-sm text-slate-600">{team.name}</span>
-                      </div>
-                      <button 
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setEditingTeamId(team.id); 
-                          setEditingTeamName(team.name); 
-                        }} 
-                        className="p-1 text-slate-400 hover:text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Edit2 size={12} />
-                      </button>
-                    </div>
-                  ))}
+            {/* Quick Add Team Actions */}
+            <div className="pt-2">
+              <button 
+                onClick={() => setIsAddingTeam(true)} 
+                className="w-full py-2 flex items-center justify-center gap-2 text-xs font-bold text-slate-400 border-2 border-dashed border-slate-100 rounded-xl hover:border-emerald-200 hover:text-emerald-500 hover:bg-emerald-50 transition-all"
+              >
+                <Plus size={16} />
+                <span>Add Team {selectedOrganization ? `to ${selectedOrganization.name}` : ''}</span>
+              </button>
+              
+              {isAddingTeam && (
+                <div className="mt-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
+                  <input 
+                    autoFocus
+                    type="text" 
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    placeholder="Team name..."
+                    className="w-full text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
+                    onKeyDown={(e) => e.key === 'Enter' && addTeam()}
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={addTeam} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1.5 rounded-lg">Add</button>
+                    <button onClick={() => setIsAddingTeam(false)} className="px-3 text-slate-400 text-[10px] font-bold">Cancel</button>
+                  </div>
                 </div>
               )}
             </div>

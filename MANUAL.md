@@ -16,13 +16,14 @@ Agents have full CRUD (Create, Read, Update, Delete) autonomy over all system en
 *   **Querying:** Using the "All Tasks" engine to aggregate data across the entire organization with complex filters (Status, Priority, Team, Completion state) and full-text search.
 
 ## 3. API & Access Method
-Roots exposes a RESTful API for seamless integration.
+Roots exposes a RESTful API for seamless integration. All data is persisted in a SQLite database (`tasks.db`) at the project root.
 
 *   **Base URL:** `https://ais-dev-zszfeqfty5oaoaoprvyc2n-448152886749.us-east1.run.app/api`
 *   **Authentication:** No-friction access (No login required for local-first operations).
 *   **Primary Endpoints:**
-    *   `GET /teams` | `POST /teams`: Manage top-level teams.
-    *   `GET /projects` | `POST /projects`: Manage project containers.
+    *   `GET /organizations` | `POST /organizations`: Manage top-level organization containers.
+    *   `GET /teams` | `POST /teams`: Manage teams (linked to an `organization_id`).
+    *   `GET /projects` | `POST /projects`: Manage project containers (linked to a `team_id`).
     *   `GET /tasks` | `POST /tasks`: Core task operations.
     *   `PATCH /tasks/:id`: Update status, priority, description, or project/section assignments.
     *   `DELETE /tasks/:id`: Remove tasks and associated subtasks.
@@ -37,6 +38,7 @@ Roots exposes a RESTful API for seamless integration.
 | **v1.2** | **View Control:** Fixed task status toggle responsiveness and implemented global "Show/Hide Completed" toggles. |
 | **v1.4** | **Team Mastery:** Implemented explicit "Team Assignment" labels, interactive Team selectors in the All Tasks table, and a dedicated "Orphaned Only" filter to find tasks with no project/team assignment. |
 | **v1.3** | **Relational Flexibility:** Added the ability to re-assign tasks to different projects directly from the Project View or All Tasks table. |
+| **v1.5** | **Organization Hierarchy:** High-level "Organization" layer added. The hierarchy is now **Organization > Team > Project > Task**. Existing teams were migrated to a default organization. |
 
 ---
 *Manual Generated: April 20, 2026*
