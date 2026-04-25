@@ -54,6 +54,8 @@ export interface Task {
   due_date: string | null;
   created_at: string;
   updated_at: string;
+  organization_id?: number | null;
+  team_id?: number | null;
   project_ids?: number[];
   section_assignments?: Record<number, number | null>; // project_id -> section_id
   subtasks?: Subtask[];

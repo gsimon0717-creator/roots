@@ -95,6 +95,8 @@ interface Task {
   due_date: string;
   key_result: string;
   created_at: string;
+  organization_id?: number | null;
+  team_id?: number | null;
   project_ids: number[];
   section_assignments: Record<number, number>;
   subtasks?: Subtask[];
@@ -397,7 +399,9 @@ export default function App() {
           priority: newTaskPriority,
           due_date: newTaskDueDate,
           key_result: newTaskKeyResult,
-          project_ids: newTaskProjectIds.length > 0 ? newTaskProjectIds : (selectedProject ? [selectedProject.id] : [])
+          project_ids: newTaskProjectIds.length > 0 ? newTaskProjectIds : (selectedProject ? [selectedProject.id] : []),
+          organization_id: selectedOrganization?.id,
+          team_id: selectedTeam?.id
         }),
       });
       const task = await res.json();
@@ -449,8 +453,27 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const assignTaskToOrganization = async (taskId: number, orgId: number) => {
+    try {
+      await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organization_id: orgId }),
+      });
+      fetchData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const assignTaskToTeam = async (taskId: number, teamId: number) => {
     try {
+      await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team_id: teamId }),
+      });
+      
       let project = projects.find(p => p.team_id === teamId);
       if (!project) {
         const teamName = teams.find(t => t.id === teamId)?.name || 'Team';
@@ -1214,6 +1237,9 @@ export default function App() {
                       .filter(t => {
                         // Filter by Organization if selected
                         if (selectedOrganization) {
+                          // Direct assignment takes precedence
+                          if (t.organization_id && t.organization_id !== selectedOrganization.id) return false;
+
                           const taskInOrg = projects.some(p => {
                             if (!t.project_ids.includes(p.id)) return false;
                             const team = teams.find(team => team.id === p.team_id);
@@ -1221,8 +1247,9 @@ export default function App() {
                           });
                           
                           // If assigned to projects but none are in this organization, hide it.
-                          // Orphaned tasks (no projects) show up in all organizations.
+                          // Only allow if it's explicitly assigned to THIS org or has no projects at all (and no conflicting explicit org).
                           if (t.project_ids.length > 0 && !taskInOrg) return false;
+                          if (t.project_ids.length === 0 && t.organization_id && t.organization_id !== selectedOrganization.id) return false;
                         }
 
                         // Filter by Team if selected
@@ -1359,19 +1386,20 @@ export default function App() {
                             />
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-bold whitespace-nowrap">
-                            {(() => {
-                              const project = projects.find(p => task.project_ids.includes(p.id));
-                              const team = teams.find(t => t.id === project?.team_id);
-                              const organization = organizations.find(o => o.id === team?.organization_id);
-                              return organization ? (
-                                <div className="flex items-center gap-1.5">
-                                  <Building size={12} className="text-slate-300" />
-                                  <span>{organization.name}</span>
-                                </div>
-                              ) : (
-                                <span className="text-amber-500 italic">Unassigned</span>
-                              );
-                            })()}
+                            <select
+                              value={(() => {
+                                const project = projects.find(p => task.project_ids.includes(p.id));
+                                const team = teams.find(t => t.id === project?.team_id);
+                                return task.organization_id || team?.organization_id || '';
+                              })()}
+                              onChange={(e) => assignTaskToOrganization(task.id, Number(e.target.value))}
+                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
+                            >
+                              <option value="" disabled>Unassigned</option>
+                              {organizations.map(org => (
+                                <option key={org.id} value={org.id}>{org.name}</option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium whitespace-nowrap">
                             <select
@@ -2467,6 +2495,20 @@ export default function App() {
 
                               <div className="p-1 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
                                 <div className="space-y-1">
+                                  <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to Organization</div>
+                                  <select 
+                                    value={task.organization_id || ''}
+                                    onChange={(e) => assignTaskToOrganization(task.id, Number(e.target.value))}
+                                    className="w-full text-xs font-bold px-3 py-2 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
+                                  >
+                                    <option value="" disabled>Select Organization...</option>
+                                    {organizations.map(org => (
+                                      <option key={org.id} value={org.id}>{org.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="space-y-1 border-t border-slate-200/50 pt-1">
                                   <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to Team</div>
                                   <select 
                                     value=""

@@ -105,10 +105,10 @@ db.exec(`
 // Migration: Add organization_id and team_id to tasks if not exists
 try {
   db.prepare("ALTER TABLE tasks ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL").run();
-} catch (e) {}
+} catch (e: any) {}
 try {
   db.prepare("ALTER TABLE tasks ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL").run();
-} catch (e) {}
+} catch (e: any) {}
 
 // Migration: Add key_result to tasks if not exists
 try {
