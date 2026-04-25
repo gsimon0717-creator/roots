@@ -138,7 +138,29 @@ async function startServer() {
 
   const apiRouter = express.Router();
 
-  // Organizations API
+  apiRouter.get("/health", (req, res) => {
+    res.json({
+      status: "ok",
+      database: "connected",
+      endpoints: [
+        "GET /api/organizations",
+        "POST /api/organizations",
+        "PATCH /api/organizations/:id",
+        "GET /api/teams",
+        "POST /api/teams",
+        "PATCH /api/teams/:id",
+        "GET /api/projects",
+        "POST /api/projects",
+        "PATCH /api/projects/:id",
+        "GET /api/tasks",
+        "GET /api/tasks/:id",
+        "POST /api/tasks",
+        "PATCH /api/tasks/:id",
+        "GET /api/sections",
+        "POST /api/sections"
+      ]
+    });
+  });
   apiRouter.get("/organizations", (req, res) => {
     const orgs = db.prepare("SELECT * FROM organizations ORDER BY name ASC").all();
     res.json(orgs);
@@ -254,6 +276,28 @@ async function startServer() {
     res.status(204).send();
   });
 
+  const getHydratedTask = (taskId: number | string) => {
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
+    if (!task) return null;
+
+    const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(taskId);
+    const projectIds = projectAssignments.map((p: any) => p.project_id);
+    const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
+      acc[p.project_id] = p.section_id;
+      return acc;
+    }, {});
+
+    const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(taskId).map((st: any) => {
+      const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
+      const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
+      return { ...st, attachments: stAttachments, comments: stComments };
+    });
+    const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(taskId);
+    const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(taskId);
+    
+    return { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments };
+  };
+
   // Tasks API
   apiRouter.get("/tasks", (req, res) => {
     const { project_id } = req.query;
@@ -269,152 +313,100 @@ async function startServer() {
       tasks = db.prepare("SELECT * FROM tasks ORDER BY created_at DESC").all();
     }
 
-    // Hydrate tasks with project_ids, subtasks, and attachments
-    const hydratedTasks = tasks.map((task: any) => {
-      const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(task.id);
-      const projectIds = projectAssignments.map((p: any) => p.project_id);
-      const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
-        acc[p.project_id] = p.section_id;
-        return acc;
-      }, {});
-
-      const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(task.id).map((st: any) => {
-        const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
-        const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
-        return { ...st, attachments: stAttachments, comments: stComments };
-      });
-      const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(task.id);
-      const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(task.id);
-      return { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments };
-    });
-
+    const hydratedTasks = tasks.map((task: any) => getHydratedTask(task.id));
     res.json(hydratedTasks);
   });
 
   apiRouter.get("/tasks/:id", (req, res) => {
     const { id } = req.params;
-    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
-    
-    if (!task) {
-      return res.status(404).json({ error: "Task not found" });
-    }
-
-    // Hydrate task with project_ids, subtasks, and attachments
-    const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(task.id);
-    const projectIds = projectAssignments.map((p: any) => p.project_id);
-    const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
-      acc[p.project_id] = p.section_id;
-      return acc;
-    }, {});
-
-    const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(task.id).map((st: any) => {
-      const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
-      const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
-      return { ...st, attachments: stAttachments, comments: stComments };
-    });
-    const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(task.id);
-    const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(task.id);
-    
-    res.json({ ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments });
+    const task = getHydratedTask(id);
+    if (!task) return res.status(404).json({ error: "Task not found" });
+    res.json(task);
   });
 
   apiRouter.post("/tasks", (req, res) => {
     const { title, description, priority, due_date, key_result, project_ids, section_id } = req.body;
-    if (!title) {
-      return res.status(400).json({ error: "Title is required" });
-    }
+    if (!title) return res.status(400).json({ error: "Title is required" });
     
-    const insertTask = db.transaction(() => {
-      const info = db.prepare(
-        "INSERT INTO tasks (title, description, priority, due_date, key_result) VALUES (?, ?, ?, ?, ?)"
-      ).run(title, description || "", priority || "moderate", due_date || null, key_result || "");
+    try {
+      let taskId: number | bigint;
       
-      const taskId = info.lastInsertRowid;
-      
-      if (project_ids && Array.isArray(project_ids)) {
-        const stmt = db.prepare("INSERT INTO task_projects (task_id, project_id, section_id) VALUES (?, ?, ?)");
-        for (const pid of project_ids) {
-          // If a section_id is provided, we use it for the primary project (first in list)
-          // or if it's explicitly for this project. For now, apply to all selected projects if provided.
-          stmt.run(taskId, pid, section_id || null);
+      const performInsert = db.transaction(() => {
+        const info = db.prepare(
+          "INSERT INTO tasks (title, description, priority, due_date, key_result) VALUES (?, ?, ?, ?, ?)"
+        ).run(title, description || "", priority || "moderate", due_date || null, key_result || "");
+        
+        taskId = info.lastInsertRowid;
+        
+        if (project_ids && Array.isArray(project_ids)) {
+          const stmt = db.prepare("INSERT INTO task_projects (task_id, project_id, section_id) VALUES (?, ?, ?)");
+          for (const pid of project_ids) {
+            stmt.run(taskId, pid, section_id || null);
+          }
         }
-      }
-      
-      return taskId;
-    });
+        return taskId;
+      });
 
-    const taskId = insertTask();
-    const newTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
-    res.status(201).json(newTask);
+      taskId = performInsert();
+      res.status(201).json(getHydratedTask(taskId));
+    } catch (e) {
+      console.error("Failed to create task:", e);
+      res.status(500).json({ error: "Failed to create task" });
+    }
   });
 
   apiRouter.patch("/tasks/:id", (req, res) => {
     const { id } = req.params;
-    const { title, description, status, priority, due_date, key_result, project_ids, section_id, current_project_id } = req.body;
+    const body = req.body;
     
-    const updateTask = db.transaction(() => {
-      const updates: string[] = [];
-      const values: any[] = [];
-
-      if (title !== undefined) { updates.push("title = ?"); values.push(title); }
-      if (description !== undefined) { updates.push("description = ?"); values.push(description); }
-      if (status !== undefined) { updates.push("status = ?"); values.push(status); }
-      if (priority !== undefined) { updates.push("priority = ?"); values.push(priority); }
-      if (due_date !== undefined) { updates.push("due_date = ?"); values.push(due_date); }
-      if (key_result !== undefined) { updates.push("key_result = ?"); values.push(key_result); }
-      
-      updates.push("updated_at = CURRENT_TIMESTAMP");
-
-      if (updates.length > 1) {
-        values.push(id);
-        const sql = `UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`;
-        db.prepare(sql).run(...values);
-      }
-
-      if (project_ids && Array.isArray(project_ids)) {
-        // Keep existing section assignments if possible
-        const existing = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(id);
-        const sectionMap = existing.reduce((acc: any, p: any) => { acc[p.project_id] = p.section_id; return acc; }, {});
-
-        db.prepare("DELETE FROM task_projects WHERE task_id = ?").run(id);
-        const stmt = db.prepare("INSERT INTO task_projects (task_id, project_id, section_id) VALUES (?, ?, ?)");
-        for (const pid of project_ids) {
-          stmt.run(id, pid, sectionMap[pid] || null);
-        }
-      }
-
-      if (section_id !== undefined && current_project_id !== undefined) {
-        db.prepare("UPDATE task_projects SET section_id = ? WHERE task_id = ? AND project_id = ?")
-          .run(section_id, id, current_project_id);
-      }
-    });
+    console.log(`PATCH /tasks/${id} received with body:`, JSON.stringify(body));
 
     try {
-      console.log(`Updating task ${id} with status: ${status}`);
-      updateTask();
-      
-      // Hydrate task with project_ids, subtasks, etc. before returning
-      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
-      if (!task) return res.status(404).json({ error: "Task not found" });
+      const performUpdate = db.transaction(() => {
+        const updates: string[] = [];
+        const values: any[] = [];
 
-      const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(task.id);
-      const projectIds = projectAssignments.map((p: any) => p.project_id);
-      const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
-        acc[p.project_id] = p.section_id;
-        return acc;
-      }, {});
+        if (body.title !== undefined) { updates.push("title = ?"); values.push(body.title); }
+        if (body.description !== undefined) { updates.push("description = ?"); values.push(body.description); }
+        if (body.status !== undefined) { updates.push("status = ?"); values.push(body.status); }
+        if (body.priority !== undefined) { updates.push("priority = ?"); values.push(body.priority); }
+        if (body.due_date !== undefined) { updates.push("due_date = ?"); values.push(body.due_date); }
+        if (body.key_result !== undefined) { updates.push("key_result = ?"); values.push(body.key_result); }
+        
+        if (updates.length > 0) {
+          updates.push("updated_at = CURRENT_TIMESTAMP");
+          values.push(id);
+          const sql = `UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`;
+          console.log(`Running SQL: ${sql} with values: ${values}`);
+          db.prepare(sql).run(...values);
+        }
 
-      const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(task.id).map((st: any) => {
-        const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
-        const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
-        return { ...st, attachments: stAttachments, comments: stComments };
+        if (body.project_ids && Array.isArray(body.project_ids)) {
+          console.log(`Updating project assignments for task ${id}:`, body.project_ids);
+          const existing = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(id);
+          const sectionMap = existing.reduce((acc: any, p: any) => { acc[p.project_id] = p.section_id; return acc; }, {});
+
+          db.prepare("DELETE FROM task_projects WHERE task_id = ?").run(id);
+          const stmt = db.prepare("INSERT INTO task_projects (task_id, project_id, section_id) VALUES (?, ?, ?)");
+          for (const pid of body.project_ids) {
+            stmt.run(id, pid, sectionMap[pid] || null);
+          }
+        }
+
+        if (body.section_id !== undefined && body.current_project_id !== undefined) {
+          console.log(`Updating section for task ${id} in project ${body.current_project_id} to ${body.section_id}`);
+          db.prepare("UPDATE task_projects SET section_id = ? WHERE task_id = ? AND project_id = ?")
+            .run(body.section_id, id, body.current_project_id);
+        }
       });
-      const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(task.id);
-      const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(task.id);
+
+      performUpdate();
       
-      const hydratedTask = { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments };
-      console.log(`Updated and hydrated task:`, hydratedTask);
-      res.json(hydratedTask);
+      const updatedTask = getHydratedTask(id);
+      if (!updatedTask) return res.status(404).json({ error: "Task not found after update" });
+      
+      console.log(`Task ${id} updated successfully:`, JSON.stringify(updatedTask));
+      res.json(updatedTask);
     } catch (e) {
       console.error(`Failed to update task ${id}:`, e);
       res.status(500).json({ error: "Failed to update task" });
@@ -543,6 +535,12 @@ async function startServer() {
   apiRouter.delete("/sections/:id", (req, res) => {
     db.prepare("DELETE FROM sections WHERE id = ?").run(req.params.id);
     res.status(204).send();
+  });
+
+  // Catch-all for apiRouter to log unmatched routes
+  apiRouter.all("*", (req, res) => {
+    console.log(`Unmatched API route: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
   });
 
   // Mount the API router
