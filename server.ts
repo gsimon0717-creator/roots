@@ -136,20 +136,22 @@ async function startServer() {
 
   app.use(express.json());
 
+  const apiRouter = express.Router();
+
   // Organizations API
-  app.get("/api/organizations", (req, res) => {
+  apiRouter.get("/organizations", (req, res) => {
     const orgs = db.prepare("SELECT * FROM organizations ORDER BY name ASC").all();
     res.json(orgs);
   });
 
-  app.post("/api/organizations", (req, res) => {
+  apiRouter.post("/organizations", (req, res) => {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
     const info = db.prepare("INSERT INTO organizations (name) VALUES (?)").run(name);
     res.status(201).json(db.prepare("SELECT * FROM organizations WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.patch("/api/organizations/:id", (req, res) => {
+  apiRouter.patch("/organizations/:id", (req, res) => {
     const { id } = req.params;
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
@@ -157,14 +159,14 @@ async function startServer() {
     res.json(db.prepare("SELECT * FROM organizations WHERE id = ?").get(id));
   });
 
-  app.delete("/api/organizations/:id", (req, res) => {
+  apiRouter.delete("/organizations/:id", (req, res) => {
     const { id } = req.params;
     db.prepare("DELETE FROM organizations WHERE id = ?").run(id);
     res.status(204).send();
   });
 
   // Teams API
-  app.get("/api/teams", (req, res) => {
+  apiRouter.get("/teams", (req, res) => {
     const { organization_id } = req.query;
     let teams;
     if (organization_id) {
@@ -175,7 +177,7 @@ async function startServer() {
     res.json(teams);
   });
 
-  app.post("/api/teams", (req, res) => {
+  apiRouter.post("/teams", (req, res) => {
     const { name } = req.body;
     let { organization_id } = req.body;
     
@@ -193,7 +195,7 @@ async function startServer() {
     res.status(201).json(db.prepare("SELECT * FROM teams WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.patch("/api/teams/:id", (req, res) => {
+  apiRouter.patch("/teams/:id", (req, res) => {
     const { id } = req.params;
     const { name, organization_id } = req.body;
     const updates: string[] = [];
@@ -206,14 +208,14 @@ async function startServer() {
     res.json(db.prepare("SELECT * FROM teams WHERE id = ?").get(id));
   });
 
-  app.delete("/api/teams/:id", (req, res) => {
+  apiRouter.delete("/teams/:id", (req, res) => {
     const { id } = req.params;
     db.prepare("DELETE FROM teams WHERE id = ?").run(id);
     res.status(204).send();
   });
 
   // Projects API
-  app.get("/api/projects", (req, res) => {
+  apiRouter.get("/projects", (req, res) => {
     const { team_id } = req.query;
     let projects;
     if (team_id) {
@@ -224,7 +226,7 @@ async function startServer() {
     res.json(projects);
   });
 
-  app.post("/api/projects", (req, res) => {
+  apiRouter.post("/projects", (req, res) => {
     const { team_id, name, description } = req.body;
     if (!team_id || !name) return res.status(400).json({ error: "team_id and name are required" });
     const info = db.prepare("INSERT INTO projects (team_id, name, description) VALUES (?, ?, ?)")
@@ -232,7 +234,7 @@ async function startServer() {
     res.status(201).json(db.prepare("SELECT * FROM projects WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.patch("/api/projects/:id", (req, res) => {
+  apiRouter.patch("/projects/:id", (req, res) => {
     const { id } = req.params;
     const { name, description, team_id } = req.body;
     const updates: string[] = [];
@@ -246,14 +248,14 @@ async function startServer() {
     res.json(db.prepare("SELECT * FROM projects WHERE id = ?").get(id));
   });
 
-  app.delete("/api/projects/:id", (req, res) => {
+  apiRouter.delete("/projects/:id", (req, res) => {
     const { id } = req.params;
     db.prepare("DELETE FROM projects WHERE id = ?").run(id);
     res.status(204).send();
   });
 
-  // API Routes
-  app.get("/api/tasks", (req, res) => {
+  // Tasks API
+  apiRouter.get("/tasks", (req, res) => {
     const { project_id } = req.query;
     let tasks;
     if (project_id) {
@@ -289,7 +291,7 @@ async function startServer() {
     res.json(hydratedTasks);
   });
 
-  app.post("/api/tasks", (req, res) => {
+  apiRouter.post("/tasks", (req, res) => {
     const { title, description, priority, due_date, key_result, project_ids, section_id } = req.body;
     if (!title) {
       return res.status(400).json({ error: "Title is required" });
@@ -319,7 +321,7 @@ async function startServer() {
     res.status(201).json(newTask);
   });
 
-  app.patch("/api/tasks/:id", (req, res) => {
+  apiRouter.patch("/tasks/:id", (req, res) => {
     const { id } = req.params;
     const { title, description, status, priority, due_date, key_result, project_ids, section_id, current_project_id } = req.body;
     
@@ -372,15 +374,24 @@ async function startServer() {
     }
   });
 
+  apiRouter.delete("/tasks/:id", (req, res) => {
+    const { id } = req.params;
+    const info = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+    if (info.changes === 0) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+    res.status(204).send();
+  });
+
   // Subtasks API
-  app.post("/api/subtasks", (req, res) => {
+  apiRouter.post("/subtasks", (req, res) => {
     const { task_id, title } = req.body;
     if (!task_id || !title) return res.status(400).json({ error: "task_id and title are required" });
     const info = db.prepare("INSERT INTO subtasks (task_id, title) VALUES (?, ?)").run(task_id, title);
     res.status(201).json(db.prepare("SELECT * FROM subtasks WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.patch("/api/subtasks/:id", (req, res) => {
+  apiRouter.patch("/subtasks/:id", (req, res) => {
     const { id } = req.params;
     const { title, status } = req.body;
     const updates: string[] = [];
@@ -393,13 +404,13 @@ async function startServer() {
     res.json(db.prepare("SELECT * FROM subtasks WHERE id = ?").get(id));
   });
 
-  app.delete("/api/subtasks/:id", (req, res) => {
+  apiRouter.delete("/subtasks/:id", (req, res) => {
     db.prepare("DELETE FROM subtasks WHERE id = ?").run(req.params.id);
     res.status(204).send();
   });
 
   // Attachments API
-  app.post("/api/attachments", (req, res) => {
+  apiRouter.post("/attachments", (req, res) => {
     const { task_id, subtask_id, name, url } = req.body;
     if (!name || !url) return res.status(400).json({ error: "name and url are required" });
     const info = db.prepare("INSERT INTO attachments (task_id, subtask_id, name, url) VALUES (?, ?, ?, ?)")
@@ -407,13 +418,13 @@ async function startServer() {
     res.status(201).json(db.prepare("SELECT * FROM attachments WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.delete("/api/attachments/:id", (req, res) => {
+  apiRouter.delete("/attachments/:id", (req, res) => {
     db.prepare("DELETE FROM attachments WHERE id = ?").run(req.params.id);
     res.status(204).send();
   });
 
   // Comments API
-  app.post("/api/comments", (req, res) => {
+  apiRouter.post("/comments", (req, res) => {
     const { task_id, subtask_id, content, attachment_name, attachment_url } = req.body;
     if (!content) return res.status(400).json({ error: "content is required" });
     if (!task_id && !subtask_id) return res.status(400).json({ error: "task_id or subtask_id is required" });
@@ -426,13 +437,13 @@ async function startServer() {
     res.status(201).json(db.prepare("SELECT * FROM comments WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.delete("/api/comments/:id", (req, res) => {
+  apiRouter.delete("/comments/:id", (req, res) => {
     db.prepare("DELETE FROM comments WHERE id = ?").run(req.params.id);
     res.status(204).send();
   });
 
   // Sections API
-  app.get("/api/sections", (req, res) => {
+  apiRouter.get("/sections", (req, res) => {
     const { project_id } = req.query;
     if (project_id) {
       const sections = db.prepare("SELECT * FROM sections WHERE project_id = ? ORDER BY order_index ASC").all(project_id);
@@ -442,7 +453,7 @@ async function startServer() {
     res.json(sections);
   });
 
-  app.post("/api/sections", (req, res) => {
+  apiRouter.post("/sections", (req, res) => {
     const { project_id, name, color } = req.body;
     if (!project_id || !name) return res.status(400).json({ error: "project_id and name are required" });
     const info = db.prepare("INSERT INTO sections (project_id, name, color) VALUES (?, ?, ?)")
@@ -450,7 +461,7 @@ async function startServer() {
     res.status(201).json(db.prepare("SELECT * FROM sections WHERE id = ?").get(info.lastInsertRowid));
   });
 
-  app.patch("/api/sections/:id", (req, res) => {
+  apiRouter.patch("/sections/:id", (req, res) => {
     const { id } = req.params;
     const { name, color, order_index } = req.body;
     const updates: string[] = [];
@@ -464,19 +475,13 @@ async function startServer() {
     res.json(db.prepare("SELECT * FROM sections WHERE id = ?").get(id));
   });
 
-  app.delete("/api/sections/:id", (req, res) => {
+  apiRouter.delete("/sections/:id", (req, res) => {
     db.prepare("DELETE FROM sections WHERE id = ?").run(req.params.id);
     res.status(204).send();
   });
 
-  app.delete("/api/tasks/:id", (req, res) => {
-    const { id } = req.params;
-    const info = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-    if (info.changes === 0) {
-      return res.status(404).json({ error: "Task not found" });
-    }
-    res.status(204).send();
-  });
+  // Mount the API router
+  app.use("/api", apiRouter);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
