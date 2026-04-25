@@ -34,8 +34,19 @@ db.exec(`
     FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS sections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT DEFAULT 'slate',
+    order_index INTEGER DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER,
+    team_id INTEGER,
     title TEXT NOT NULL,
     description TEXT,
     status TEXT DEFAULT 'pending',
@@ -43,7 +54,9 @@ db.exec(`
     due_date TEXT,
     key_result TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organization_id) REFERENCES organizations (id) ON DELETE SET NULL,
+    FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE SET NULL
   );
 
   CREATE TABLE IF NOT EXISTS task_projects (
@@ -54,15 +67,6 @@ db.exec(`
     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
     FOREIGN KEY (section_id) REFERENCES sections (id) ON DELETE SET NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS sections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    color TEXT DEFAULT 'slate',
-    order_index INTEGER DEFAULT 0,
-    FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS subtasks (
@@ -97,6 +101,14 @@ db.exec(`
     FOREIGN KEY (subtask_id) REFERENCES subtasks (id) ON DELETE CASCADE
   );
 `);
+
+// Migration: Add organization_id and team_id to tasks if not exists
+try {
+  db.prepare("ALTER TABLE tasks ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL").run();
+} catch (e) {}
+try {
+  db.prepare("ALTER TABLE tasks ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL").run();
+} catch (e) {}
 
 // Migration: Add key_result to tasks if not exists
 try {
@@ -280,8 +292,22 @@ async function startServer() {
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as any;
     if (!task) return null;
 
-    const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(taskId);
+    const projectAssignments = db.prepare(`
+      SELECT tp.project_id, tp.section_id, p.team_id, t.organization_id 
+      FROM task_projects tp 
+      JOIN projects p ON tp.project_id = p.id 
+      JOIN teams t ON p.team_id = t.id 
+      WHERE tp.task_id = ?
+    `).all(taskId) as any[];
+    
     const projectIds = projectAssignments.map((p: any) => p.project_id);
+    const teamIdsFromProjects = Array.from(new Set(projectAssignments.map((p: any) => p.team_id)));
+    const organizationIdsFromProjects = Array.from(new Set(projectAssignments.map((p: any) => p.organization_id)));
+    
+    // Support direct columns if set, otherwise fallback to project-derived ones
+    const finalOrgId = task.organization_id || organizationIdsFromProjects[0] || null;
+    const finalTeamId = task.team_id || teamIdsFromProjects[0] || null;
+
     const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
       acc[p.project_id] = p.section_id;
       return acc;
@@ -295,7 +321,19 @@ async function startServer() {
     const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(taskId);
     const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(taskId);
     
-    return { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments };
+    return { 
+      ...task, 
+      project_ids: projectIds, 
+      team_ids: teamIdsFromProjects, 
+      organization_ids: organizationIdsFromProjects,
+      org_id: finalOrgId,
+      team_id: finalTeamId,
+      organization_id: finalOrgId,
+      section_assignments: sectionAssignments, 
+      subtasks, 
+      attachments, 
+      comments 
+    };
   };
 
   // Tasks API
@@ -325,7 +363,7 @@ async function startServer() {
   });
 
   apiRouter.post("/tasks", (req, res) => {
-    const { title, description, priority, due_date, key_result, project_ids, section_id } = req.body;
+    const { title, description, priority, due_date, key_result, project_ids, section_id, organization_id, team_id, org_id } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required" });
     
     try {
@@ -333,8 +371,8 @@ async function startServer() {
       
       const performInsert = db.transaction(() => {
         const info = db.prepare(
-          "INSERT INTO tasks (title, description, priority, due_date, key_result) VALUES (?, ?, ?, ?, ?)"
-        ).run(title, description || "", priority || "moderate", due_date || null, key_result || "");
+          "INSERT INTO tasks (title, description, priority, due_date, key_result, organization_id, team_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run(title, description || "", priority || "moderate", due_date || null, key_result || "", organization_id || org_id || null, team_id || null);
         
         taskId = info.lastInsertRowid;
         
@@ -347,7 +385,7 @@ async function startServer() {
         return taskId;
       });
 
-      taskId = performInsert();
+      taskId = performInsert() as number;
       res.status(201).json(getHydratedTask(taskId));
     } catch (e) {
       console.error("Failed to create task:", e);
@@ -373,11 +411,18 @@ async function startServer() {
         if (body.due_date !== undefined) { updates.push("due_date = ?"); values.push(body.due_date); }
         if (body.key_result !== undefined) { updates.push("key_result = ?"); values.push(body.key_result); }
         
+        // Aliases for organization_id
+        const orgIdToUse = body.organization_id ?? body.org_id ?? body.organizationId ?? body.orgId;
+        if (orgIdToUse !== undefined) { updates.push("organization_id = ?"); values.push(orgIdToUse); }
+        
+        // Aliases for team_id
+        const teamIdToUse = body.team_id ?? body.teamId;
+        if (teamIdToUse !== undefined) { updates.push("team_id = ?"); values.push(teamIdToUse); }
+        
         if (updates.length > 0) {
           updates.push("updated_at = CURRENT_TIMESTAMP");
           values.push(id);
           const sql = `UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`;
-          console.log(`Running SQL: ${sql} with values: ${values}`);
           db.prepare(sql).run(...values);
         }
 
