@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const db = new Database("tasks.db");
+db.pragma('foreign_keys = ON');
 
 // Initialize database
 db.exec(`
@@ -413,11 +414,19 @@ async function startServer() {
         
         // Aliases for organization_id
         const orgIdToUse = body.organization_id ?? body.org_id ?? body.organizationId ?? body.orgId;
-        if (orgIdToUse !== undefined) { updates.push("organization_id = ?"); values.push(orgIdToUse); }
+        if (orgIdToUse !== undefined) { 
+          console.log(`Setting organization_id to ${orgIdToUse} for task ${id}`);
+          updates.push("organization_id = ?"); 
+          values.push(orgIdToUse); 
+        }
         
         // Aliases for team_id
         const teamIdToUse = body.team_id ?? body.teamId;
-        if (teamIdToUse !== undefined) { updates.push("team_id = ?"); values.push(teamIdToUse); }
+        if (teamIdToUse !== undefined) { 
+          console.log(`Setting team_id to ${teamIdToUse} for task ${id}`);
+          updates.push("team_id = ?"); 
+          values.push(teamIdToUse); 
+        }
         
         if (updates.length > 0) {
           updates.push("updated_at = CURRENT_TIMESTAMP");

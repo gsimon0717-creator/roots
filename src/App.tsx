@@ -468,12 +468,6 @@ export default function App() {
 
   const assignTaskToTeam = async (taskId: number, teamId: number) => {
     try {
-      await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ team_id: teamId }),
-      });
-      
       let project = projects.find(p => p.team_id === teamId);
       if (!project) {
         const teamName = teams.find(t => t.id === teamId)?.name || 'Team';
@@ -492,13 +486,21 @@ export default function App() {
       if (project) {
         const task = tasks.find(t => t.id === taskId);
         if (task) {
-          // In the table view, we usually treat assignment as a move or primary home setting.
-          // For simplicity, we'll replace the project list if it was orphaned or just add to it.
-          // Given the user request, we'll replace the first project or add if empty.
           const newProjectIds = task.project_ids.length > 0 
             ? [project.id, ...task.project_ids.filter(id => id !== project.id)]
             : [project.id];
-          await updateTaskDetails(taskId, { project_ids: newProjectIds });
+          
+          const team = teams.find(t => t.id === teamId);
+          await fetch(`/api/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              team_id: teamId,
+              organization_id: team?.organization_id || null,
+              project_ids: newProjectIds 
+            }),
+          });
+          fetchData();
         }
       }
     } catch (e) { console.error(e); }
@@ -1386,37 +1388,48 @@ export default function App() {
                             />
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-bold whitespace-nowrap">
-                            <select
-                              value={(() => {
-                                const project = projects.find(p => task.project_ids.includes(p.id));
-                                const team = teams.find(t => t.id === project?.team_id);
-                                return task.organization_id || team?.organization_id || '';
-                              })()}
-                              onChange={(e) => assignTaskToOrganization(task.id, Number(e.target.value))}
-                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
-                            >
-                              <option value="" disabled>Unassigned</option>
-                              {organizations.map(org => (
-                                <option key={org.id} value={org.id}>{org.name}</option>
-                              ))}
-                            </select>
+                            {(() => {
+                              const project = projects.find(p => task.project_ids.includes(p.id));
+                              const team = teams.find(t => t.id === project?.team_id);
+                              const orgId = task.organization_id || team?.organization_id || '';
+                              
+                              return (
+                                <select
+                                  value={orgId}
+                                  onChange={(e) => assignTaskToOrganization(task.id, Number(e.target.value))}
+                                  className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
+                                >
+                                  <option value="" disabled>Unassigned</option>
+                                  {organizations.map(org => (
+                                    <option key={org.id} value={org.id}>{org.name}</option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium whitespace-nowrap">
-                            <select
-                              value={team?.id || ''}
-                              onChange={(e) => assignTaskToTeam(task.id, Number(e.target.value))}
-                              className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
-                            >
-                              <option value="" disabled>Unassigned</option>
-                              {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(t => {
-                                const orgName = organizations.find(o => o.id === t.organization_id)?.name || 'Unassigned';
-                                return (
-                                  <option key={t.id} value={t.id}>
-                                    {t.name} {!selectedOrganization ? `(${orgName})` : ''}
-                                  </option>
-                                );
-                              })}
-                            </select>
+                            {(() => {
+                              const projectForTeam = projects.find(p => task.project_ids.includes(p.id));
+                              const currentTeamId = task.team_id || projectForTeam?.team_id || '';
+                              
+                              return (
+                                <select
+                                  value={currentTeamId}
+                                  onChange={(e) => assignTaskToTeam(task.id, Number(e.target.value))}
+                                  className="bg-transparent border-none focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-2 py-1 cursor-pointer w-full font-bold text-slate-700"
+                                >
+                                  <option value="" disabled>Unassigned</option>
+                                  {teams.filter(t => !selectedOrganization || t.organization_id === selectedOrganization.id).map(t => {
+                                    const orgName = organizations.find(o => o.id === t.organization_id)?.name || 'Unassigned';
+                                    return (
+                                      <option key={t.id} value={t.id}>
+                                        {t.name} {!selectedOrganization ? `(${orgName})` : ''}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500 font-medium">
                             <select
@@ -2497,7 +2510,11 @@ export default function App() {
                                 <div className="space-y-1">
                                   <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to Organization</div>
                                   <select 
-                                    value={task.organization_id || ''}
+                                    value={(() => {
+                                      const projectForOrg = projects.find(p => task.project_ids.includes(p.id));
+                                      const teamForOrg = teams.find(t => t.id === projectForOrg?.team_id);
+                                      return task.organization_id || teamForOrg?.organization_id || '';
+                                    })()}
                                     onChange={(e) => assignTaskToOrganization(task.id, Number(e.target.value))}
                                     className="w-full text-xs font-bold px-3 py-2 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
                                   >
@@ -2511,7 +2528,10 @@ export default function App() {
                                 <div className="space-y-1 border-t border-slate-200/50 pt-1">
                                   <div className="px-3 pt-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to Team</div>
                                   <select 
-                                    value=""
+                                    value={(() => {
+                                      const projectForTeam = projects.find(p => task.project_ids.includes(p.id));
+                                      return task.team_id || projectForTeam?.team_id || '';
+                                    })()}
                                     onChange={(e) => assignTaskToTeam(task.id, Number(e.target.value))}
                                     className="w-full text-xs font-bold px-3 py-2 bg-transparent border-none focus:ring-0 text-slate-600 cursor-pointer"
                                   >
