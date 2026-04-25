@@ -291,6 +291,33 @@ async function startServer() {
     res.json(hydratedTasks);
   });
 
+  apiRouter.get("/tasks/:id", (req, res) => {
+    const { id } = req.params;
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
+    
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    // Hydrate task with project_ids, subtasks, and attachments
+    const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(task.id);
+    const projectIds = projectAssignments.map((p: any) => p.project_id);
+    const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
+      acc[p.project_id] = p.section_id;
+      return acc;
+    }, {});
+
+    const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(task.id).map((st: any) => {
+      const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
+      const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
+      return { ...st, attachments: stAttachments, comments: stComments };
+    });
+    const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(task.id);
+    const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(task.id);
+    
+    res.json({ ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments });
+  });
+
   apiRouter.post("/tasks", (req, res) => {
     const { title, description, priority, due_date, key_result, project_ids, section_id } = req.body;
     if (!title) {
