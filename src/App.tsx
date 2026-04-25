@@ -403,7 +403,7 @@ export default function App() {
       const task = await res.json();
       
       if (newTaskSectionId && selectedProject) {
-        await fetch(`/api/tasks/${task.id}/section`, {
+        await fetch(`/api/tasks/${task.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ section_id: newTaskSectionId, current_project_id: selectedProject.id }),

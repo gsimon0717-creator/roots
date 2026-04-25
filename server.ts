@@ -392,12 +392,50 @@ async function startServer() {
     try {
       console.log(`Updating task ${id} with status: ${status}`);
       updateTask();
-      const updatedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
-      console.log(`Updated task:`, updatedTask);
-      res.json(updatedTask);
+      
+      // Hydrate task with project_ids, subtasks, etc. before returning
+      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
+      if (!task) return res.status(404).json({ error: "Task not found" });
+
+      const projectAssignments = db.prepare("SELECT project_id, section_id FROM task_projects WHERE task_id = ?").all(task.id);
+      const projectIds = projectAssignments.map((p: any) => p.project_id);
+      const sectionAssignments = projectAssignments.reduce((acc: any, p: any) => {
+        acc[p.project_id] = p.section_id;
+        return acc;
+      }, {});
+
+      const subtasks = db.prepare("SELECT * FROM subtasks WHERE task_id = ?").all(task.id).map((st: any) => {
+        const stAttachments = db.prepare("SELECT * FROM attachments WHERE subtask_id = ?").all(st.id);
+        const stComments = db.prepare("SELECT * FROM comments WHERE subtask_id = ? ORDER BY created_at ASC").all(st.id);
+        return { ...st, attachments: stAttachments, comments: stComments };
+      });
+      const attachments = db.prepare("SELECT * FROM attachments WHERE task_id = ? AND subtask_id IS NULL").all(task.id);
+      const comments = db.prepare("SELECT * FROM comments WHERE task_id = ? AND subtask_id IS NULL ORDER BY created_at ASC").all(task.id);
+      
+      const hydratedTask = { ...task, project_ids: projectIds, section_assignments: sectionAssignments, subtasks, attachments, comments };
+      console.log(`Updated and hydrated task:`, hydratedTask);
+      res.json(hydratedTask);
     } catch (e) {
       console.error(`Failed to update task ${id}:`, e);
       res.status(500).json({ error: "Failed to update task" });
+    }
+  });
+
+  // Alias for backward compatibility or specific use cases
+  apiRouter.patch("/tasks/:id/section", (req, res) => {
+    const { id } = req.params;
+    const { section_id, current_project_id } = req.body;
+    
+    try {
+      db.prepare("UPDATE task_projects SET section_id = ? WHERE task_id = ? AND project_id = ?")
+        .run(section_id, id, current_project_id);
+      
+      // Return the updated task
+      const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+      res.json(task);
+    } catch (e) {
+      console.error(`Failed to update task ${id} section:`, e);
+      res.status(500).json({ error: "Failed to update project section" });
     }
   });
 
