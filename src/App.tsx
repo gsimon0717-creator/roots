@@ -26,7 +26,8 @@ import {
   Info,
   Maximize2,
   AlertTriangle,
-  Building
+  Building,
+  User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -97,11 +98,19 @@ interface Task {
   created_at: string;
   organization_id?: number | null;
   team_id?: number | null;
+  assignee_id?: number | null;
   project_ids: number[];
   section_assignments: Record<number, number>;
   subtasks?: Subtask[];
   attachments?: Attachment[];
   comments?: Comment[];
+}
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  avatar_url: string;
 }
 
 const SECTION_COLORS = [
@@ -124,6 +133,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [allSections, setAllSections] = useState<Record<number, Section[]>>({});
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
@@ -135,6 +145,7 @@ export default function App() {
   const [newTaskPriority, setNewTaskPriority] = useState<Task['priority']>('moderate');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const [newTaskKeyResult, setNewTaskKeyResult] = useState('');
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState<number | null>(null);
   const [newTaskProjectIds, setNewTaskProjectIds] = useState<number[]>([]);
   const [newTaskSectionId, setNewTaskSectionId] = useState<number | null>(null);
   
@@ -146,6 +157,8 @@ export default function App() {
   
   const [newProjectName, setNewProjectName] = useState('');
   const [isAddingProject, setIsAddingProject] = useState(false);
+  const [showAllTasksAddForm, setShowAllTasksAddForm] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionColor, setNewSectionColor] = useState('slate');
@@ -198,12 +211,13 @@ export default function App() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [orgsRes, teamsRes, projectsRes, tasksRes, allSectionsRes] = await Promise.all([
+      const [orgsRes, teamsRes, projectsRes, tasksRes, allSectionsRes, usersRes] = await Promise.all([
         fetch('/api/organizations'),
         fetch('/api/teams'),
         fetch('/api/projects'),
         fetch('/api/tasks'),
-        fetch('/api/sections')
+        fetch('/api/sections'),
+        fetch('/api/users')
       ]);
       
       const orgsData = await orgsRes.json();
@@ -211,11 +225,13 @@ export default function App() {
       const projectsData = await projectsRes.json();
       const tasksData = await tasksRes.json();
       const allSectionsData = await allSectionsRes.json();
+      const usersData = await usersRes.json();
       
       setOrganizations(orgsData);
       setTeams(teamsData);
       setProjects(projectsData);
       setTasks(tasksData);
+      setUsers(usersData);
 
       // Group sections by project_id
       const sectionsMap = allSectionsData.reduce((acc: Record<number, Section[]>, s: Section) => {
@@ -399,6 +415,7 @@ export default function App() {
           priority: newTaskPriority,
           due_date: newTaskDueDate,
           key_result: newTaskKeyResult,
+          assignee_id: newTaskAssigneeId,
           project_ids: newTaskProjectIds.length > 0 ? newTaskProjectIds : (selectedProject ? [selectedProject.id] : []),
           organization_id: selectedOrganization?.id,
           team_id: selectedTeam?.id
@@ -418,6 +435,7 @@ export default function App() {
       setNewTaskPriority('moderate');
       setNewTaskDueDate('');
       setNewTaskKeyResult('');
+      setNewTaskAssigneeId(null);
       setNewTaskSectionId(null);
       fetchData();
     } catch (e) { console.error(e); }
@@ -464,6 +482,17 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const assignTaskToUser = async (taskId: number, userId: number | null) => {
+    try {
+      await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee_id: userId }),
+      });
+      fetchData();
+    } catch (e) { console.error(e); }
   };
 
   const assignTaskToTeam = async (taskId: number, teamId: number) => {
@@ -623,12 +652,33 @@ export default function App() {
     }
   };
 
+  const toggleNode = (nodeId: string) => {
+    setExpandedNodes(prev => ({ ...prev, [nodeId]: !prev[nodeId] }));
+  };
+
+  const getAssigneeAvatar = (assigneeId: number | null | undefined) => {
+    if (!assigneeId) return null;
+    const user = users.find(u => u.id === assigneeId);
+    if (!user) return null;
+    return (
+      <div className="flex items-center gap-2">
+        <img 
+          src={user.avatar_url} 
+          alt={user.name} 
+          className="w-5 h-5 rounded-full ring-1 ring-slate-200"
+          referrerPolicy="no-referrer"
+        />
+        <span className="text-xs text-slate-600">{user.name}</span>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
-        <div className="p-6 pb-2 flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 overflow-hidden">
+      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 transition-all duration-300">
+        <div className="p-6 pb-4 flex items-center gap-3">
+          <div className="w-10 h-10 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 overflow-hidden cursor-pointer" onClick={() => setCurrentView('all-tasks')}>
             <img 
               src="https://picsum.photos/seed/tree-roots-underground/100/100" 
               alt="Roots Logo" 
@@ -636,359 +686,203 @@ export default function App() {
               referrerPolicy="no-referrer"
             />
           </div>
-          <h1 className="text-2xl font-black tracking-tighter text-emerald-950">Roots</h1>
+          <h1 className="text-2xl font-black tracking-tighter text-emerald-950 cursor-pointer" onClick={() => setCurrentView('all-tasks')}>Roots</h1>
         </div>
 
-        {/* Organization Switcher */}
-        <div className="px-6 py-4 border-b border-slate-100 mb-2">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Organization</label>
-            <button 
-              onClick={() => setIsAddingOrg(true)}
-              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-            >
-              <Plus size={14} />
-            </button>
-          </div>
+        <div className="px-4 mb-4 space-y-1">
+          <button 
+            onClick={() => {
+              setCurrentView('all-tasks');
+              setSelectedOrganization(null);
+              setSelectedTeam(null);
+              setSelectedProject(null);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all ${currentView === 'all-tasks' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-100' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            <LayoutDashboard size={18} />
+            <span className="text-sm font-bold">All Tasks</span>
+          </button>
+          
+          <button 
+            onClick={() => {
+              setCurrentView('about');
+              setSelectedOrganization(null);
+              setSelectedTeam(null);
+              setSelectedProject(null);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all ${currentView === 'about' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-100' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Info size={18} />
+            <span className="text-sm font-bold">About</span>
+          </button>
+        </div>
 
-          {isAddingOrg && (
-            <div className="mb-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
-              <input 
-                autoFocus
-                type="text"
-                value={newOrgName}
-                onChange={(e) => setNewOrgName(e.target.value)}
-                placeholder="Company Name..."
-                className="w-full text-xs border border-emerald-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500"
-                onKeyDown={(e) => e.key === 'Enter' && addOrganization()}
-              />
-              <div className="flex gap-2">
-                <button onClick={addOrganization} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1 rounded-lg">Create</button>
-                <button onClick={() => setIsAddingOrg(false)} className="px-2 text-emerald-600 text-[10px] font-bold">Cancel</button>
-              </div>
+        <nav className="flex-grow overflow-y-auto px-2 pb-6 custom-scrollbar">
+          <div className="space-y-1">
+            <div className="px-4 py-2 flex items-center justify-between group">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Business Structure</span>
+              <button 
+                onClick={() => setIsAddingOrg(true)}
+                className="p-1 text-slate-400 hover:text-emerald-600 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                <Plus size={14} />
+              </button>
             </div>
-          )}
 
-          <div className="relative group/org">
-            <select
-              value={selectedOrganization?.id || 'all'}
-              onChange={(e) => {
-                if (e.target.value === 'all') {
-                  setSelectedOrganization(null);
-                } else {
-                  const org = organizations.find(o => o.id === Number(e.target.value));
-                  if (org) setSelectedOrganization(org);
-                }
-                setSelectedTeam(null);
-                setSelectedProject(null);
-              }}
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 cursor-pointer"
-            >
-              <option value="all">All Organizations</option>
-              {organizations.map(org => (
-                <option key={org.id} value={org.id}>{org.name}</option>
-              ))}
-            </select>
-            <Building size={16} className="absolute left-3 top-3 text-slate-400 group-focus-within/org:text-emerald-500 transition-colors" />
-            <ChevronDown size={14} className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" />
-          </div>
-        </div>
-
-        <nav className="flex-grow overflow-y-auto px-4 space-y-6 pb-6">
-          {/* Organization & Teams Hierarchy */}
-          <div className="space-y-6">
-            {/* Unassigned Teams Section - HIGHLIGHT if any exist */}
-            {teams.filter(t => !t.organization_id).length > 0 && (
-              <div className="space-y-2 pb-4 border-b border-slate-100">
-                <div className="flex items-center gap-2 px-2">
-                  <AlertTriangle size={12} className="text-amber-500 animate-pulse" />
-                  <label className="text-[10px] font-black text-amber-500 uppercase tracking-widest leading-none">Unassigned Teams</label>
-                </div>
-                <div className="space-y-1">
-                  {teams.filter(t => !t.organization_id).map(team => (
-                    <div key={team.id} className="group">
-                      {editingTeamId === team.id ? (
-                        <div className="px-2 py-1 space-y-2 bg-amber-50 rounded-xl border border-amber-100 mb-1">
-                          <input 
-                            autoFocus
-                            type="text"
-                            value={editingTeamName}
-                            onChange={(e) => setEditingTeamName(e.target.value)}
-                            className="w-full text-sm bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:border-amber-500"
-                            onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
-                          />
-                          <div className="space-y-1">
-                            <label className="text-[9px] font-black text-amber-600 uppercase tracking-widest pl-1">Assign to Organization</label>
-                            <select
-                              value=""
-                              onChange={async (e) => {
-                                const newOrgId = Number(e.target.value);
-                                try {
-                                  await fetch(`/api/teams/${team.id}`, {
-                                    method: 'PATCH',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ organization_id: newOrgId }),
-                                  });
-                                  fetchData();
-                                } catch (e) { console.error(e); }
-                              }}
-                              className="w-full text-xs bg-white border border-amber-200 rounded-lg px-2 py-1 focus:outline-none focus:border-amber-500"
-                            >
-                              <option value="" disabled>Select...</option>
-                              {organizations.map(o => (
-                                <option key={o.id} value={o.id}>{o.name}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex gap-2">
-                            <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-amber-700">Update</button>
-                            <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div 
-                          onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}
-                          className="flex items-center justify-between px-3 py-2 hover:bg-amber-50 rounded-xl transition-all cursor-pointer group/team"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Users size={16} className="text-amber-400" />
-                            <span className="text-sm font-medium text-slate-600">{team.name}</span>
-                          </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setEditingTeamId(team.id); setEditingTeamName(team.name); }}
-                              className="p-1 text-slate-400 hover:text-amber-600 transition-colors"
-                            >
-                              <Edit2 size={12} />
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteTeam(team.id); }} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+            {isAddingOrg && (
+              <div className="mx-4 mb-3 p-3 bg-emerald-50 rounded-2xl border border-emerald-100 space-y-2 animate-in fade-in slide-in-from-top-2">
+                <input 
+                  autoFocus
+                  type="text"
+                  value={newOrgName}
+                  onChange={(e) => setNewOrgName(e.target.value)}
+                  placeholder="Organization..."
+                  className="w-full text-xs border border-emerald-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  onKeyDown={(e) => e.key === 'Enter' && addOrganization()}
+                />
+                <div className="flex gap-2">
+                  <button onClick={addOrganization} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-2 rounded-xl">Create</button>
+                  <button onClick={() => setIsAddingOrg(false)} className="px-3 text-emerald-600 text-[10px] font-bold">Cancel</button>
                 </div>
               </div>
             )}
 
-            {(selectedOrganization ? [selectedOrganization] : organizations).map(org => {
-              const orgTeams = teams.filter(t => t.organization_id === org.id);
-              return (
-                <div key={org.id} className="space-y-2">
-                  <div className="flex items-center justify-between px-2 group/org-header">
-                    <div className="flex items-center gap-2">
-                      <Building size={12} className="text-slate-400" />
-                      <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{org.name}</h2>
+            {/* Unassigned Teams */}
+            {teams.filter(t => !t.organization_id).length > 0 && (
+              <div className="space-y-1 mt-2 mb-4">
+                <div className="px-4 flex items-center gap-2">
+                  <AlertTriangle size={12} className="text-amber-500" />
+                  <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Unassigned Teams</span>
+                </div>
+                {teams.filter(t => !t.organization_id).map(team => (
+                  <div key={team.id} className="mx-2">
+                    <div 
+                      onClick={() => { setSelectedTeam(team); setSelectedOrganization(null); setSelectedProject(null); setCurrentView('project'); }}
+                      className={`flex items-center justify-between px-4 py-2 rounded-xl transition-all cursor-pointer group ${selectedTeam?.id === team.id ? 'bg-amber-50 text-amber-700' : 'hover:bg-amber-50/50 text-slate-500'}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Users size={16} className={selectedTeam?.id === team.id ? 'text-amber-500' : 'text-slate-400'} />
+                        <span className="text-sm font-medium">{team.name}</span>
+                      </div>
                     </div>
-                    {!selectedOrganization && (
-                      <button 
-                        onClick={() => deleteOrganization(org.id)}
-                        className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover/org-header:opacity-100 transition-opacity"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="space-y-1">
-                    {orgTeams.map(team => (
-                      <div key={team.id} className="group">
-                        {editingTeamId === team.id ? (
-                          <div className="px-2 py-1 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-1">
-                            <input 
-                              autoFocus
-                              type="text"
-                              value={editingTeamName}
-                              onChange={(e) => setEditingTeamName(e.target.value)}
-                              className="w-full text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                              onKeyDown={(e) => e.key === 'Enter' && updateTeam(team.id, editingTeamName)}
-                            />
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Organization</label>
-                              <select
-                                value={team.organization_id || ''}
-                                onChange={async (e) => {
-                                  const newOrgId = e.target.value ? Number(e.target.value) : null;
-                                  try {
-                                    await fetch(`/api/teams/${team.id}`, {
-                                      method: 'PATCH',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ organization_id: newOrgId }),
-                                    });
-                                    fetchData();
-                                  } catch (e) { console.error(e); }
-                                }}
-                                className="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                              >
-                                <option value="">No Organization (Unassigned)</option>
-                                {organizations.map(o => (
-                                  <option key={o.id} value={o.id}>{o.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => updateTeam(team.id, editingTeamName)} className="text-[10px] font-bold text-emerald-600">Update</button>
-                              <button onClick={() => setEditingTeamId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className={`flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer group/team ${selectedTeam?.id === team.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}>
-                            <div className="flex items-center gap-3 flex-grow" onClick={() => { setSelectedTeam(team); setSelectedProject(null); setCurrentView('project'); }}>
-                              <Users size={16} className={selectedTeam?.id === team.id ? 'text-emerald-600' : 'text-slate-400'} />
-                              <span className="text-sm">{team.name}</span>
-                            </div>
-                            <div className="flex items-center gap-1 opacity-0 group-hover/team:opacity-100 transition-opacity">
-                              <button onClick={() => { setEditingTeamId(team.id); setEditingTeamName(team.name); }} className="p-1 text-slate-400 hover:text-emerald-600">
-                                <Edit2 size={12} />
-                              </button>
-                              <button onClick={() => deleteTeam(team.id)} className="p-1 text-slate-400 hover:text-red-500">
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {orgTeams.length === 0 && (
-                      <div className="px-3 py-2 text-[10px] text-slate-400 italic">No teams in this organization</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Quick Add Team Actions */}
-            <div className="pt-2">
-              <button 
-                onClick={() => setIsAddingTeam(true)} 
-                className="w-full py-2 flex items-center justify-center gap-2 text-xs font-bold text-slate-400 border-2 border-dashed border-slate-100 rounded-xl hover:border-emerald-200 hover:text-emerald-500 hover:bg-emerald-50 transition-all"
-              >
-                <Plus size={16} />
-                <span>Add Team {selectedOrganization ? `to ${selectedOrganization.name}` : ''}</span>
-              </button>
-              
-              {isAddingTeam && (
-                <div className="mt-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100 space-y-2">
-                  <input 
-                    autoFocus
-                    type="text" 
-                    value={newTeamName}
-                    onChange={(e) => setNewTeamName(e.target.value)}
-                    placeholder="Team name..."
-                    className="w-full text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
-                    onKeyDown={(e) => e.key === 'Enter' && addTeam()}
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={addTeam} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1.5 rounded-lg">Add</button>
-                    <button onClick={() => setIsAddingTeam(false)} className="px-3 text-slate-400 text-[10px] font-bold">Cancel</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Projects Section */}
-          {selectedTeam && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between px-2 mb-2">
-                <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Projects</h2>
-                <button onClick={() => setIsAddingProject(true)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
-                  <Plus size={16} />
-                </button>
-              </div>
-
-              {isAddingProject && (
-                <div className="px-2 py-2 space-y-2 bg-slate-50 rounded-xl border border-slate-100 mb-2">
-                  <input 
-                    autoFocus
-                    type="text" 
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                    placeholder="Project name..."
-                    className="w-full text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
-                    onKeyDown={(e) => e.key === 'Enter' && addProject()}
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={addProject} className="flex-grow bg-emerald-600 text-white text-[10px] font-bold py-1.5 rounded-lg">Add</button>
-                    <button onClick={() => setIsAddingProject(false)} className="px-3 text-slate-400 text-[10px] font-bold">Cancel</button>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-1">
-                {projects.filter(p => p.team_id === selectedTeam.id).map(project => (
-                  <div key={project.id} className="group">
-                    {editingProjectId === project.id ? (
-                      <div className="px-2 py-1 space-y-1">
-                        <input 
-                          autoFocus
-                          type="text"
-                          value={editingProjectName}
-                          onChange={(e) => setEditingProjectName(e.target.value)}
-                          className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                          onKeyDown={(e) => e.key === 'Enter' && updateProject(project.id, editingProjectName, project.description, editingProjectTeamId)}
-                        />
-                        <select
-                          value={editingProjectTeamId || ''}
-                          onChange={(e) => setEditingProjectTeamId(Number(e.target.value))}
-                          className="w-full text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-                        >
-                          {teams.map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </select>
-                        <div className="flex gap-2">
-                          <button onClick={() => updateProject(project.id, editingProjectName, project.description, editingProjectTeamId)} className="text-[10px] font-bold text-emerald-600">Update</button>
-                          <button onClick={() => setEditingProjectId(null)} className="text-[10px] font-bold text-slate-400">Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={`flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer ${selectedProject?.id === project.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}>
-                        <div className="flex items-center gap-3 flex-grow" onClick={() => { setSelectedProject(project); setCurrentView('project'); }}>
-                          <FolderKanban size={16} className={selectedProject?.id === project.id ? 'text-emerald-600' : 'text-slate-400'} />
-                          <span className="text-sm">{project.name}</span>
-                        </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditingProjectId(project.id); setEditingProjectName(project.name); setEditingProjectTeamId(project.team_id); }} className="p-1 text-slate-400 hover:text-emerald-600">
-                            <Edit2 size={12} />
-                          </button>
-                          <button onClick={() => deleteProject(project.id)} className="p-1 text-slate-400 hover:text-red-500">
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Views Section */}
-          <div className="space-y-2 mt-6">
-            <div className="flex items-center justify-between px-2 mb-2">
-              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Views</h2>
-            </div>
-            <div 
-              onClick={() => { setCurrentView('all-tasks'); setSelectedProject(null); setSelectedTeam(null); }}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all cursor-pointer ${currentView === 'all-tasks' ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}
-            >
-              <LayoutDashboard size={16} className={currentView === 'all-tasks' ? 'text-emerald-600' : 'text-slate-400'} />
-              <span className="text-sm">All Tasks</span>
-            </div>
-            <div 
-              onClick={() => { setCurrentView('about'); setSelectedProject(null); setSelectedTeam(null); }}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all cursor-pointer ${currentView === 'about' ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'hover:bg-slate-50 text-slate-600'}`}
-            >
-              <Info size={16} className={currentView === 'about' ? 'text-emerald-600' : 'text-slate-400'} />
-              <span className="text-sm">About</span>
-            </div>
+            {/* Organizations Tree */}
+            {organizations.map(org => {
+              const orgTeams = teams.filter(t => t.organization_id === org.id);
+              const isExpanded = expandedNodes[`org-${org.id}`];
+              const isSelected = selectedOrganization?.id === org.id;
+
+              return (
+                <div key={org.id} className="space-y-1">
+                  <div 
+                    className={`flex items-center justify-between px-4 py-2 rounded-xl mx-2 cursor-pointer transition-all group ${isSelected ? 'bg-emerald-50/50 text-emerald-700' : 'hover:bg-slate-50 text-slate-600'}`}
+                    onClick={() => {
+                      toggleNode(`org-${org.id}`);
+                      setSelectedOrganization(org);
+                      setSelectedTeam(null);
+                      setSelectedProject(null);
+                      setCurrentView('project');
+                    }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <ChevronRight 
+                        size={14} 
+                        className={`text-slate-400 transition-transform duration-200 flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`} 
+                      />
+                      <Building size={16} className={isSelected ? 'text-emerald-600' : 'text-slate-400'} />
+                      <span className="text-sm font-bold truncate">{org.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setIsAddingTeam(true); setSelectedOrganization(org); }}
+                        className="p-1 text-slate-400 hover:text-emerald-600"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="ml-6 space-y-1 relative before:absolute before:left-3 before:top-2 before:bottom-4 before:w-px before:bg-slate-100">
+                      {orgTeams.map(team => {
+                        const teamProjects = projects.filter(p => p.team_id === team.id);
+                        const isTeamExpanded = expandedNodes[`team-${team.id}`];
+                        const isTeamSelected = selectedTeam?.id === team.id;
+
+                        return (
+                          <div key={team.id} className="space-y-1">
+                            <div 
+                              className={`flex items-center justify-between px-4 py-2 rounded-xl mx-2 cursor-pointer transition-all group ${isTeamSelected ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-slate-50 text-slate-500'}`}
+                              onClick={() => {
+                                toggleNode(`team-${team.id}`);
+                                setSelectedTeam(team);
+                                setSelectedOrganization(org);
+                                setSelectedProject(null);
+                                setCurrentView('project');
+                              }}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <ChevronRight 
+                                  size={12} 
+                                  className={`text-slate-400 transition-transform duration-200 flex-shrink-0 ${isTeamExpanded ? 'rotate-90' : ''}`} 
+                                />
+                                <Users size={14} className={isTeamSelected ? 'text-emerald-500' : 'text-slate-400'} />
+                                <span className="text-sm font-medium truncate">{team.name}</span>
+                              </div>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setIsAddingProject(true); setSelectedTeam(team); }}
+                                  className="p-1 text-slate-400 hover:text-emerald-600"
+                                >
+                                  <Plus size={12} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {isTeamExpanded && (
+                              <div className="ml-6 space-y-1 relative before:absolute before:left-3 before:top-2 before:bottom-4 before:w-px before:bg-slate-100/50">
+                                {teamProjects.map(project => {
+                                  const isProjectSelected = selectedProject?.id === project.id;
+                                  return (
+                                    <div 
+                                      key={project.id}
+                                      onClick={() => {
+                                        setSelectedProject(project);
+                                        setSelectedTeam(team);
+                                        setSelectedOrganization(org);
+                                        setCurrentView('project');
+                                      }}
+                                      className={`flex items-center gap-3 px-4 py-2 rounded-xl mx-2 cursor-pointer transition-all ${isProjectSelected ? 'bg-slate-100 text-slate-900 border border-slate-200 shadow-sm' : 'hover:bg-slate-50 text-slate-400'}`}
+                                    >
+                                      <FolderKanban size={14} />
+                                      <span className="text-xs font-semibold truncate">{project.name}</span>
+                                    </div>
+                                  );
+                                })}
+                                {teamProjects.length === 0 && (
+                                  <div className="px-4 py-2 text-[10px] text-slate-300 italic ml-4">No projects</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {orgTeams.length === 0 && (
+                        <div className="px-4 py-2 text-[10px] text-slate-300 italic ml-7">No teams</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </nav>
 
-        <div className="p-4 border-t border-slate-200">
+        <div className="p-4 border-t border-slate-100 mt-auto">
           <button 
             onClick={() => setShowApiDocs(true)}
             className="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all group"
@@ -996,6 +890,16 @@ export default function App() {
             <Terminal size={18} className="group-hover:rotate-12 transition-transform" />
             <span className="text-sm font-bold">API Documentation</span>
           </button>
+          
+          <div className="flex items-center gap-3 px-4 py-3 mt-2 border-t border-slate-50">
+            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-400">
+              <UserIcon size={16} />
+            </div>
+            <div className="flex-grow min-w-0">
+              <div className="text-[10px] font-bold text-slate-900 truncate">Personal Workspace</div>
+              <div className="text-[10px] text-slate-500">Free Plan</div>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -1141,6 +1045,18 @@ export default function App() {
             <div className="max-w-7xl mx-auto space-y-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setShowAllTasksAddForm(!showAllTasksAddForm)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-bold transition-all border ${
+                      showAllTasksAddForm 
+                        ? 'bg-emerald-600 text-white border-emerald-600' 
+                        : 'bg-white text-emerald-600 border-emerald-200 hover:border-emerald-600 shadow-sm'
+                    }`}
+                  >
+                    <Plus size={14} />
+                    {showAllTasksAddForm ? 'Cancel' : 'New Task'}
+                  </button>
+                  <div className="w-px h-6 bg-slate-200 mx-2" />
                   <div className="flex items-center gap-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Priority</label>
                     <select 
@@ -1197,6 +1113,130 @@ export default function App() {
                 )}
               </div>
 
+              {showAllTasksAddForm && (
+                <form 
+                  onSubmit={async (e) => {
+                    await addTask(e);
+                    setShowAllTasksAddForm(false);
+                  }} 
+                  className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4 animate-in fade-in slide-in-from-top-2 duration-300"
+                >
+                  <div className="relative group">
+                    <input 
+                      autoFocus
+                      type="text" 
+                      placeholder="What needs to be done?" 
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      className="w-full text-lg font-medium bg-transparent border-none focus:ring-0 placeholder:text-slate-300"
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors">
+                      <Plus size={20} />
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Priority</label>
+                      <select 
+                        value={newTaskPriority}
+                        onChange={(e) => setNewTaskPriority(e.target.value as Task['priority'])}
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="low">Low</option>
+                        <option value="moderate">Moderate</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assignee</label>
+                      <select
+                        value={newTaskAssigneeId || ''}
+                        onChange={(e) => setNewTaskAssigneeId(e.target.value ? Number(e.target.value) : null)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="">Unassigned</option>
+                        {users.map(u => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Due Date</label>
+                      <input 
+                        type="date"
+                        value={newTaskDueDate}
+                        onChange={(e) => setNewTaskDueDate(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Key Result</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. increase conversion"
+                        value={newTaskKeyResult}
+                        onChange={(e) => setNewTaskKeyResult(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 w-40"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Project</label>
+                      <select
+                        value={newTaskProjectIds[0] || ''}
+                        onChange={(e) => {
+                          const pid = Number(e.target.value);
+                          if (pid) {
+                            setNewTaskProjectIds([pid]);
+                          } else {
+                            setNewTaskProjectIds([]);
+                          }
+                        }}
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500 max-w-[150px]"
+                      >
+                        <option value="">No Project (Orphaned)</option>
+                        {projects.map(p => {
+                          const t = teams.find(team => team.id === p.team_id);
+                          const o = organizations.find(org => org.id === t?.organization_id);
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({t?.name || 'No Team'}{o ? ` - ${o.name}` : ''})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assignee</label>
+                      <select
+                        value={newTaskAssigneeId || ''}
+                        onChange={(e) => setNewTaskAssigneeId(e.target.value ? Number(e.target.value) : null)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="">Unassigned</option>
+                        {users.map(u => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button 
+                      type="submit"
+                      disabled={!newTaskTitle.trim()}
+                      className="ml-auto bg-emerald-600 text-white px-6 py-2 rounded-xl text-xs font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-emerald-200"
+                    >
+                      Create Task
+                    </button>
+                  </div>
+                </form>
+              )}
+
               <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-sm">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -1204,6 +1244,7 @@ export default function App() {
                       {[
                         { key: 'status', label: 'Status' },
                         { key: 'title', label: 'Task' },
+                        { key: 'assignee_id', label: 'Assignee' },
                         { key: 'key_result', label: 'Key Result' },
                         { key: 'priority', label: 'Priority' },
                         { key: 'due_date', label: 'Due Date' },
@@ -1359,6 +1400,28 @@ export default function App() {
                             </button>
                           </td>
                           <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              {task.assignee_id && (
+                                <img 
+                                  src={users.find(u => u.id === task.assignee_id)?.avatar_url} 
+                                  alt="" 
+                                  className="w-5 h-5 rounded-full ring-1 ring-slate-100"
+                                  referrerPolicy="no-referrer"
+                                />
+                              )}
+                              <select
+                                value={task.assignee_id || ''}
+                                onChange={(e) => assignTaskToUser(task.id, e.target.value ? Number(e.target.value) : null)}
+                                className="bg-transparent border-none focus:ring-0 text-xs font-medium text-slate-600 cursor-pointer p-0"
+                              >
+                                <option value="">Unassigned</option>
+                                {users.map(u => (
+                                  <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
                             <input
                               type="text"
                               value={task.key_result || ''}
@@ -1494,6 +1557,20 @@ export default function App() {
                       <option value="moderate">Moderate</option>
                       <option value="high">High</option>
                       <option value="urgent">Urgent</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assignee</label>
+                    <select
+                      value={newTaskAssigneeId || ''}
+                      onChange={(e) => setNewTaskAssigneeId(e.target.value ? Number(e.target.value) : null)}
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="">Unassigned</option>
+                      {users.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -2421,6 +2498,30 @@ export default function App() {
                       <div className="space-y-10 border-l border-slate-100 pl-8">
                         {/* Meta Info */}
                         <div className="space-y-6">
+                          <div className="space-y-2">
+                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Assignee</h4>
+                            <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-1.5 focus-within:border-emerald-500 transition-colors">
+                              {task.assignee_id && (
+                                <img 
+                                  src={users.find(u => u.id === task.assignee_id)?.avatar_url} 
+                                  alt="" 
+                                  className="w-6 h-6 rounded-full ml-1"
+                                  referrerPolicy="no-referrer"
+                                />
+                              )}
+                              <select 
+                                value={task.assignee_id || ''}
+                                onChange={(e) => assignTaskToUser(task.id, e.target.value ? Number(e.target.value) : null)}
+                                className="bg-transparent border-none focus:ring-0 text-xs font-bold text-slate-700 cursor-pointer flex-grow py-1.5"
+                              >
+                                <option value="">Unassigned</option>
+                                {users.map(u => (
+                                  <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
                           <div className="space-y-2">
                             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Priority</h4>
                             <select 

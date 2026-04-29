@@ -12,6 +12,14 @@ db.pragma('foreign_keys = ON');
 
 // Initialize database
 db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    avatar_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS organizations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -110,6 +118,9 @@ try {
 try {
   db.prepare("ALTER TABLE tasks ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL").run();
 } catch (e: any) {}
+try {
+  db.prepare("ALTER TABLE tasks ADD COLUMN assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL").run();
+} catch (e: any) {}
 
 // Migration: Add key_result to tasks if not exists
 try {
@@ -141,6 +152,19 @@ if (teamCount.count === 0) {
   const teamInfo = db.prepare("INSERT INTO teams (name, organization_id) VALUES (?, ?)").run("Personal", defaultOrgId);
   db.prepare("INSERT INTO projects (team_id, name, description) VALUES (?, ?, ?)")
     .run(teamInfo.lastInsertRowid, "General", "Default project for miscellaneous tasks");
+}
+
+const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
+if (userCount.count === 0) {
+  const users = [
+    { name: "John Doe", email: "john@example.com", avatar_url: "https://api.dicebear.com/7.x/avataaars/svg?seed=John" },
+    { name: "Jane Smith", email: "jane@example.com", avatar_url: "https://api.dicebear.com/7.x/avataaars/svg?seed=Jane" },
+    { name: "Bob Wilson", email: "bob@example.com", avatar_url: "https://api.dicebear.com/7.x/avataaars/svg?seed=Bob" }
+  ];
+  const stmt = db.prepare("INSERT INTO users (name, email, avatar_url) VALUES (?, ?, ?)");
+  for (const user of users) {
+    stmt.run(user.name, user.email, user.avatar_url);
+  }
 }
 
 async function startServer() {
@@ -177,6 +201,11 @@ async function startServer() {
   apiRouter.get("/organizations", (req, res) => {
     const orgs = db.prepare("SELECT * FROM organizations ORDER BY name ASC").all();
     res.json(orgs);
+  });
+
+  apiRouter.get("/users", (req, res) => {
+    const users = db.prepare("SELECT * FROM users ORDER BY name ASC").all();
+    res.json(users);
   });
 
   apiRouter.post("/organizations", (req, res) => {
@@ -364,7 +393,7 @@ async function startServer() {
   });
 
   apiRouter.post("/tasks", (req, res) => {
-    const { title, description, priority, due_date, key_result, project_ids, section_id, organization_id, team_id, org_id } = req.body;
+    const { title, description, priority, due_date, key_result, project_ids, section_id, organization_id, team_id, org_id, assignee_id } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required" });
     
     try {
@@ -372,8 +401,8 @@ async function startServer() {
       
       const performInsert = db.transaction(() => {
         const info = db.prepare(
-          "INSERT INTO tasks (title, description, priority, due_date, key_result, organization_id, team_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ).run(title, description || "", priority || "moderate", due_date || null, key_result || "", organization_id || org_id || null, team_id || null);
+          "INSERT INTO tasks (title, description, priority, due_date, key_result, organization_id, team_id, assignee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(title, description || "", priority || "moderate", due_date || null, key_result || "", organization_id || org_id || null, team_id || null, assignee_id || null);
         
         taskId = info.lastInsertRowid;
         
@@ -411,6 +440,7 @@ async function startServer() {
         if (body.priority !== undefined) { updates.push("priority = ?"); values.push(body.priority); }
         if (body.due_date !== undefined) { updates.push("due_date = ?"); values.push(body.due_date); }
         if (body.key_result !== undefined) { updates.push("key_result = ?"); values.push(body.key_result); }
+        if (body.assignee_id !== undefined) { updates.push("assignee_id = ?"); values.push(body.assignee_id); }
         
         // Aliases for organization_id
         const orgIdToUse = body.organization_id ?? body.org_id ?? body.organizationId ?? body.orgId;

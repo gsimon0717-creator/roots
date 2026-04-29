@@ -45,6 +45,13 @@ export interface Section {
   order_index: number;
 }
 
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+  avatar_url: string;
+}
+
 export interface Task {
   id: number;
   title: string;
@@ -56,6 +63,7 @@ export interface Task {
   updated_at: string;
   organization_id?: number | null;
   team_id?: number | null;
+  assignee_id?: number | null;
   project_ids?: number[];
   section_assignments?: Record<number, number | null>; // project_id -> section_id
   subtasks?: Subtask[];
